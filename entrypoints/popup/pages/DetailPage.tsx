@@ -11,6 +11,7 @@ import root from 'react-shadow'
 import { useCollapseState } from '@/lib/useCollapseState'
 import { createStyleSheets } from '@/lib/addStyle'
 import { MailActions, urlsFromSender } from '@/components/extra/MailActions'
+import { sanitizeMail } from '@/lib/sanitizeMail'
 import { Avatar } from '@/components/extra/Avatar'
 import { PageHeader, PageTitle } from '@/components/extra/PageHeader'
 import { Textarea } from '@/components/ui/textarea'
@@ -169,9 +170,10 @@ const MailContent = memo((props: { contentHtml: string; styles: string[] }) => {
   const styleSheets = useMemo(() => {
     return createStyleSheets([BASE_RESET_STYLE, ...props.styles, DARK_MODE_FILTER_STYLE])
   }, [props.styles])
+  const html = useMemo(() => sanitizeMail(props.contentHtml), [props.contentHtml])
   return (
     <ShadowDiv styleSheets={styleSheets}>
-      <div dangerouslySetInnerHTML={{ __html: props.contentHtml }} style={{ overflowX: 'auto' }} />
+      <div dangerouslySetInnerHTML={{ __html: html }} style={{ overflowX: 'auto' }} />
     </ShadowDiv>
   )
 })

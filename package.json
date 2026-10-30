@@ -2,7 +2,7 @@
   "name": "mailbell",
   "description": "Mailbell for Gmail: Gmail notifications in the toolbar, via the Gmail API",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "wxt",
@@ -27,6 +27,7 @@
     "clsx": "^2.1.1",
     "css-select": "^7.0.0",
     "dayjs": "^1.11.21",
+    "dompurify": "^3.4.17",
     "entities": "^8.0.0",
     "es-toolkit": "^1.50.0",
     "lucide-react": "^1.28.0",

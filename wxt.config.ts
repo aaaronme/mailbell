@@ -50,6 +50,8 @@ export default defineConfig({
             required: ['none'],
           },
         },
+        // data_collection_permissions reached Android in 142.
+        gecko_android: { strict_min_version: '142.0' },
       }
     }
     return manifest

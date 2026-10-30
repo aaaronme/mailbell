@@ -17,7 +17,9 @@ To build locally instead: `pnpm zip:firefox && pnpm zip`, output in `.output/`.
 1. Sign in at the [Add-on Developer Hub](https://addons.mozilla.org/developers/) and choose **Submit a New Add-on** (later: **Upload New Version** on the add-on's page).
 2. Distribution: **On this site**.
 3. Upload `mailbell-<version>-firefox.zip`.
-4. Source code: yes, upload `mailbell-<version>-sources.zip` (the build is bundled). Reviewer notes: "Build with `pnpm install && pnpm zip:firefox` (Node 22). No built-in OAuth client; `.env` is empty."
+4. Source code: yes, upload `mailbell-<version>-sources.zip` (the build is bundled). Reviewer notes:
+
+   > Build with `pnpm install && pnpm zip:firefox` (Node 22); the output is unminified. No built-in OAuth client (`.env` is empty): users create their own. The validator's innerHTML warnings are inside React DOM (`dangerouslySetInnerHTML`) and DOMPurify. The one place Mailbell renders HTML is a mail body, in `entrypoints/popup/pages/DetailPage.tsx` (`MailContent`), sanitized first with DOMPurify (`lib/sanitizeMail.ts`), inside a shadow root, under the default MV3 CSP.
 5. Listing: summary, category **Alerts & Updates**, the GPL-3.0 licence, homepage and support URL (the GitHub repo), screenshots. Privacy policy: "Mailbell has no server. Mail goes only between the browser and Google; nothing is collected." The manifest already declares `data_collection_permissions: none`.
 
 Review usually takes from minutes to a few days. The add-on ID is fixed (`mailbell@aaaronme.github.io`), so the Firefox redirect URI users register stays the same across versions.
