@@ -50,6 +50,12 @@ export default defineConfig({
     }
     return manifest
   },
+  // 127.0.0.1, not localhost: the dev server would bind IPv6 only, and some
+  // Firefox builds resolve the popup's localhost scripts to IPv4.
+  dev: {
+    server: { host: '127.0.0.1', port: 3000, origin: 'http://127.0.0.1:3000' },
+  },
+  // Load the extension by hand (README -> Development); no auto-opened browser.
   webExt: {
     disabled: true,
   },

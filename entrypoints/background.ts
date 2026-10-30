@@ -166,7 +166,10 @@ async function start() {
   // Sign-in runs here, not in the popup: the popup closes the moment
   // Google's sign-in window takes focus, taking any pending work with it.
   bgMessager.onMessage('addAccount', async ({ data: loginHint }) => {
-    const account = await signIn(loginHint)
+    const account = await signIn(loginHint).catch(async (err) => {
+      await debugLog('background: sign-in failed ->', String(err))
+      throw err
+    })
     await debugLog('background: signed in ->', account.email)
     await clearInboxCache(account.email)
     await stateManager.refresh()

@@ -142,6 +142,9 @@ interface TokenResponse {
   access_token: string
   expires_in: number
   refresh_token?: string
+  // Space-separated: what the user actually granted, which with granular
+  // consent can be less than what was asked for.
+  scope?: string
 }
 
 export class OAuthError extends Error {
@@ -169,7 +172,12 @@ async function fetchEmail(accessToken: string): Promise<string> {
   const resp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
-  if (!resp.ok) throw new Error(`profile: ${resp.status}`)
+  if (!resp.ok) {
+    // Google says why in the body, e.g. that the Gmail API is disabled in the
+    // client's Cloud project, with a link to enable it.
+    const json = await resp.json().catch(() => ({}))
+    throw new OAuthError(`profile_${resp.status}`, json.error?.message)
+  }
   return ((await resp.json()) as { emailAddress: string }).emailAddress
 }
 
@@ -197,6 +205,9 @@ export async function signIn(loginHint?: string): Promise<Account> {
     grant_type: 'authorization_code',
   })
   if (!token.refresh_token) throw new OAuthError('no_refresh_token')
+  if (!token.scope?.split(' ').includes(GMAIL_SCOPE)) {
+    throw new OAuthError('scope_not_granted', 'Gmail access was not granted. Sign in again and tick the Gmail checkbox.')
+  }
   const account: Account = {
     email: await fetchEmail(token.access_token),
     refreshToken: token.refresh_token,

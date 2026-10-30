@@ -13,6 +13,7 @@ import {
 
 vi.stubGlobal('browser', fakeBrowser)
 
+const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.modify'
 const ACCOUNT = { email: 'me@gmail.com', refreshToken: 'r1', accessToken: 'a1', expiresAt: 0 }
 
 describe('PKCE', () => {
@@ -30,7 +31,7 @@ describe('PKCE', () => {
       client_id: 'cid',
       redirect_uri: 'https://x.extensions.allizom.org/',
       response_type: 'code',
-      scope: 'https://www.googleapis.com/auth/gmail.modify',
+      scope: GMAIL_SCOPE,
       code_challenge: 'ch',
       code_challenge_method: 'S256',
       access_type: 'offline',
@@ -111,7 +112,7 @@ describe('tokens', () => {
     fetchMock.mockImplementation(async (url: string) =>
       url.endsWith('/profile')
         ? Response.json({ emailAddress: 'me@gmail.com' })
-        : Response.json({ access_token: 'a1', refresh_token: 'r1', expires_in: 3600 }),
+        : Response.json({ access_token: 'a1', refresh_token: 'r1', expires_in: 3600, scope: GMAIL_SCOPE }),
     )
     await fakeBrowser.storage.local.set({ oauthAccounts: [{ ...ACCOUNT, needsReauth: true }] })
     const account = await signIn('me@gmail.com')
@@ -121,6 +122,26 @@ describe('tokens', () => {
     const body = Object.fromEntries(fetchMock.mock.calls[0]![1].body as URLSearchParams)
     expect(body).toMatchObject({ code: 'c1', grant_type: 'authorization_code', redirect_uri: 'https://x.extensions.allizom.org/' })
     expect(body.code_verifier).toMatch(/^[A-Za-z0-9_-]{43}$/)
+  })
+
+  it("explains a sign-in that can't read Gmail", async () => {
+    vi.spyOn(fakeBrowser.identity, 'getRedirectURL').mockReturnValue('https://x.extensions.allizom.org/')
+    vi.spyOn(fakeBrowser.identity, 'launchWebAuthFlow').mockImplementation(async ({ url }) => {
+      const state = new URL(url).searchParams.get('state')
+      return `https://x.extensions.allizom.org/?state=${state}&code=c1`
+    })
+    // Gmail unticked on the consent screen.
+    fetchMock.mockImplementation(async () => Response.json({ access_token: 'a1', refresh_token: 'r1', expires_in: 3600, scope: 'openid' }))
+    await expect(signIn()).rejects.toThrow('scope_not_granted')
+
+    // Gmail API off in the client's Cloud project: Google's reason comes through.
+    fetchMock.mockImplementation(async (url: string) =>
+      url.endsWith('/profile')
+        ? Response.json({ error: { code: 403, message: 'Gmail API has not been used in project 1 or it is disabled.' } }, { status: 403 })
+        : Response.json({ access_token: 'a1', refresh_token: 'r1', expires_in: 3600, scope: GMAIL_SCOPE }),
+    )
+    await expect(signIn()).rejects.toThrow('profile_403: Gmail API has not been used in project 1 or it is disabled.')
+    expect(await getAccounts()).toEqual([])
   })
 
   it('rejects a redirect with the wrong state', async () => {

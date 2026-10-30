@@ -33,11 +33,13 @@ To avoid both, use your own Google Cloud OAuth client. Go to **Settings → Goog
 ```sh
 pnpm install
 cp .env.example .env    # optional: built-in OAuth client, see docs/SETUP.md
-pnpm dev:firefox        # or: pnpm dev (Chrome)
+pnpm dev:firefox        # or: pnpm dev (Chrome); then load the add-on, see below
 pnpm test               # vitest in headless Chromium
 pnpm compile            # type-check
 pnpm zip:firefox        # AMO upload + sources zip in .output/
 ```
+
+Needs Node 22.12 or newer, and Firefox 140 or newer. The dev command doesn't open a browser: load `.output/firefox-mv3/manifest.json` in `about:debugging` → **This Firefox** → **Load Temporary Add-on**. A temporary add-on loses its storage when it is removed.
 
 Without a `.env`, the build has no built-in client. Add a client under **Settings** before you sign in.
 
