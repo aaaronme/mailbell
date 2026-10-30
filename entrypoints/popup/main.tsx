@@ -1,5 +1,7 @@
 import ReactDOM from 'react-dom/client'
 import App from './App.js'
+import '@fontsource-variable/geist'
+import '@fontsource-variable/source-serif-4'
 import './style.css'
 import { debugLog } from '@/lib/debugLog'
 import { isPopoutTab } from './view'

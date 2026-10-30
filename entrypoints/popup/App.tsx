@@ -16,9 +16,9 @@ function AppContent() {
     // as soon as any component using it mounts - no separate "show cached
     // snapshot" pull needed. This only needs to (a) invalidate the query
     // when background pushes 'refreshPopup', so any mounted useMailQuery
-    // re-reads storage, and (b) kick off an actual fresh remote fetch,
-    // since background's own alarm only runs on its own schedule and without this the popup can sit on stale data until
-    // one of those fires.
+    // re-reads storage, and (b) kick off an actual fresh remote fetch:
+    // background's own alarm runs on its own schedule, and the popup could
+    // sit on stale data until it fires.
     popupMessager.onMessage('refreshPopup', () => {
       queryClient.invalidateQueries({ queryKey: mailQueryKey })
     })
@@ -33,7 +33,7 @@ function AppContent() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <Toaster richColors={true} closeButton={true} />
+      <Toaster closeButton={true} />
       <AppContent />
     </QueryClientProvider>
   )

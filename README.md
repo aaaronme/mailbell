@@ -41,6 +41,8 @@ pnpm zip:firefox        # AMO upload + sources zip in .output/
 
 Without a `.env`, the build has no built-in client. Add a client under **Settings** before you sign in.
 
+UI work follows [STYLE_GUIDE.md](STYLE_GUIDE.md). `pnpm test` enforces its rules.
+
 ## Credits
 
 Mailbell is a fork of [rxliuli/gmail-notifier](https://github.com/rxliuli/gmail-notifier). The original reads Gmail through your browser session; Mailbell replaces that layer with OAuth and the Gmail API.

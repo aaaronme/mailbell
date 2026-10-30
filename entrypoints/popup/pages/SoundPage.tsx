@@ -1,7 +1,6 @@
 import { Button } from '@/components/ui/button'
-import { useNavigate } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeftIcon } from 'lucide-react'
+import { PageHeader, PageTitle } from '@/components/extra/PageHeader'
 import { toast } from 'sonner'
 import {
   clearNotificationSound,
@@ -14,7 +13,6 @@ import { isPopoutTab } from '../view'
 const soundQueryKey = ['notificationSound']
 
 export function SoundPage() {
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const soundQuery = useQuery({ queryKey: soundQueryKey, queryFn: getNotificationSound })
   const sound = soundQuery.data ?? null
@@ -38,16 +36,11 @@ export function SoundPage() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen">
-      <div className="flex items-center px-4 py-2 bg-background shadow-sm border-b border-border gap-2 sticky top-0 z-10">
-        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => navigate({ to: '/' })}>
-          <ArrowLeftIcon className="w-4 h-4" />
-        </Button>
-        <span className="font-medium text-foreground flex-1">Notification sound</span>
-      </div>
-      <div className="flex flex-col gap-3 p-4 text-sm">
+    <div className="flex min-h-screen flex-col">
+      <PageHeader back title={<PageTitle>Notification sound</PageTitle>} />
+      <div className="flex flex-col gap-3 p-4">
         <p>
-          Current: <span className="font-medium">{sound ? sound.name : 'none (system sound only)'}</span>
+          <span className="text-foreground/60">Current:</span> <span className="font-medium">{sound ? sound.name : 'none (system sound only)'}</span>
         </p>
         <div className="flex gap-2">
           {/* Firefox closes the toolbar popup as soon as a file dialog opens,
@@ -85,7 +78,7 @@ export function SoundPage() {
             </>
           )}
         </div>
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-foreground/60">
           Plays when new mail arrives. To avoid two sounds, turn off "Play sound for notifications" for Firefox in
           macOS System Settings → Notifications.
         </p>

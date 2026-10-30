@@ -5,13 +5,14 @@ import { useMailQuery } from '@/lib/useMailQuery'
 import type { EmailThread } from '@/lib/StateManager'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import dayjs from 'dayjs'
-import { ArrowLeftIcon, PaperclipIcon, ChevronsUpDownIcon, ChevronsDownUpIcon } from 'lucide-react'
+import { PaperclipIcon, ChevronsUpDownIcon, ChevronsDownUpIcon } from 'lucide-react'
 import { memo, useEffect, useMemo } from 'react'
 import root from 'react-shadow'
 import { useCollapseState } from '@/lib/useCollapseState'
 import { createStyleSheets } from '@/lib/addStyle'
-import { debugLog } from '@/lib/debugLog'
 import { MailActions, urlsFromSender } from '@/components/extra/MailActions'
+import { Avatar } from '@/components/extra/Avatar'
+import { PageHeader, PageTitle } from '@/components/extra/PageHeader'
 
 // Not importing detailRoute directly from router.tsx: that file imports
 // this one (as the route's component), so a direct import would be
@@ -170,29 +171,19 @@ const MailContent = memo((props: { contentHtml: string; styles: string[] }) => {
   )
 })
 
-// New: Collapsed messages count indicator component
-const CollapsedMessagesIndicator = memo(
-  (props: { count: number; startIndex: number; onExpand: (startIndex: number, count: number) => void }) => {
-    const { count, startIndex, onExpand } = props
-
-    return (
-      <div
-        data-testid="collapsed-indicator"
-        data-count={count}
-        className="flex items-center justify-center py-1 cursor-pointer hover:bg-accent/30 transition-colors border-b border-border"
-        onClick={() => onExpand(startIndex, count)}
-      >
-        <div className="flex items-center gap-2 px-4 py-2 bg-muted/50 border border-border rounded-lg text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors">
-          <div className="w-6 h-6 flex items-center justify-center rounded-full bg-primary/20 border border-primary/30 text-primary font-medium text-xs">
-            {count}
-          </div>
-          <span>messages collapsed</span>
-          <ChevronsUpDownIcon className="w-3 h-3" />
-        </div>
-      </div>
-    )
-  },
-)
+// The run of older messages folded into one row.
+const CollapsedMessagesIndicator = memo((props: { count: number; onExpand: () => void }) => (
+  <button
+    type="button"
+    data-testid="collapsed-indicator"
+    data-count={props.count}
+    className="flex w-full cursor-pointer items-center justify-center gap-2 border-b border-foreground/10 py-2 text-xs text-foreground/60 transition-colors hover:bg-foreground/5 hover:text-foreground"
+    onClick={props.onExpand}
+  >
+    <span className="font-medium tabular-nums">{props.count}</span> messages collapsed
+    <ChevronsUpDownIcon className="size-3" />
+  </button>
+))
 
 // Attachments are fetched on click: the API serves them as base64 JSON, so
 // there's no plain link to point the browser at.
@@ -223,28 +214,24 @@ const MailMessage = function MailMessage(props: {
     return (
       <div
         data-testid="mail-message"
-        className="flex items-center gap-3 px-4 py-3 border-b border-border last:border-b-0 bg-background rounded shadow-sm cursor-pointer hover:bg-accent"
+        className="flex cursor-pointer items-center gap-3 border-b border-foreground/10 px-4 py-3 transition-colors hover:bg-foreground/5"
         onClick={onToggle}
       >
-        {/* Avatar */}
-        <div className="w-10 h-10 flex items-center justify-center rounded-full bg-primary text-primary-foreground text-lg font-bold">
-          {message.senderName.charAt(0)}
-        </div>
-        {/* Sender info and summary */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between">
-            <span className="font-semibold text-foreground min-w-0 truncate">{message.senderName}</span>
+        <Avatar name={message.senderName} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="min-w-0 flex-1 truncate font-medium">{message.senderName}</span>
             {message.time && (
               <time
                 dateTime={dayjs(message.time).toISOString()}
-                title={dayjs(message.time).format('YYYY-MM-DD hh:mm:ss')}
-                className="text-xs text-muted-foreground ml-2 shrink-0"
+                title={dayjs(message.time).format('YYYY-MM-DD HH:mm:ss')}
+                className="shrink-0 text-xs text-foreground/40 tabular-nums"
               >
-                {dayjs(message.time).format('YYYY-MM-DD hh:mm')}
+                {dayjs(message.time).format('YYYY-MM-DD HH:mm')}
               </time>
             )}
           </div>
-          <div className="text-sm text-muted-foreground truncate mt-1">{message.contentText}</div>
+          <div className="truncate text-foreground/60">{message.contentText}</div>
         </div>
       </div>
     )
@@ -253,26 +240,21 @@ const MailMessage = function MailMessage(props: {
   return (
     <div
       data-testid="mail-message"
-      className="flex flex-col gap-3 px-4 py-3 border-b border-border last:border-b-0 bg-background rounded shadow-sm"
+      className="flex flex-col gap-3 border-b border-foreground/10 px-4 py-3"
     >
-      {/* Email header */}
       <div className="flex items-start gap-3">
-        {/* Avatar */}
-        <div className="w-10 h-10 flex items-center justify-center rounded-full bg-primary text-primary-foreground text-lg font-bold">
-          {message.senderName.charAt(0)}
-        </div>
-        {/* Sender info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between">
-            <div className="min-w-0 truncate">
-              <span className="font-semibold text-foreground">{message.senderName}</span>
-              <span className="text-muted-foreground ml-2">&lt;{message.senderEmail}&gt;</span>
+        <Avatar name={message.senderName} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1 truncate">
+              <span className="font-medium">{message.senderName}</span>
+              <span className="ml-1.5 text-foreground/40">{message.senderEmail}</span>
             </div>
-            <span className="text-xs text-muted-foreground whitespace-nowrap shrink-0 ml-2">
+            <span className="shrink-0 text-xs whitespace-nowrap text-foreground/40 tabular-nums">
               {message.time && dayjs(message.time).format('YYYY-MM-DD HH:mm')}
             </span>
           </div>
-          <div className="text-sm text-muted-foreground mt-1">
+          <div className="text-xs text-foreground/60">
             <div>To: {message.to.join(', ')}</div>
             {message.cc.length > 0 && <div>Cc: {message.cc.join(', ')}</div>}
           </div>
@@ -282,15 +264,15 @@ const MailMessage = function MailMessage(props: {
       <MailContent contentHtml={message.contentHtml} styles={styles} />
       {/* Attachments */}
       {message.attachments && message.attachments.length > 0 && (
-        <div className="flex flex-wrap gap-2 mt-2">
+        <div className="flex flex-wrap gap-2">
           {message.attachments.map((attachment) => (
             <button
               key={attachment.attachmentId}
               type="button"
               onClick={() => downloadAttachment(account, attachment)}
-              className="flex items-center gap-1 px-2 py-1 text-sm text-muted-foreground bg-muted rounded hover:bg-accent"
+              className="flex cursor-pointer items-center gap-1.5 border border-foreground/15 px-2 py-1 text-xs text-foreground/80 transition-colors hover:border-foreground/30 hover:bg-foreground/5"
             >
-              <PaperclipIcon className="w-3 h-3" />
+              <PaperclipIcon className="size-3 text-foreground/60" />
               <span className="truncate max-w-[200px]">{attachment.fileName}</span>
             </button>
           ))}
@@ -315,15 +297,6 @@ export function DetailPage() {
   // free instead of needing to sync one shared instance to a new count.
   const messageCount = thread?.messageCount ?? 0
   const collapseStore = useCollapseState(messageCount)
-
-  // Diagnostic for the click-kills-the-popup bug: fires after the first
-  // commit, i.e. once the email's HTML is actually in the document. If a
-  // teardown follows a 'mail clicked' log WITHOUT this line, the page died
-  // before the mail content ever rendered - ruling out every "something in
-  // the email HTML triggered it" theory for that repro.
-  useEffect(() => {
-    void debugLog('popup: detail mounted ->', threadUrl)
-  }, [threadUrl])
 
   useEffect(() => {
     // Unlike the initial "does this thread exist" check (handled by the
@@ -353,7 +326,7 @@ export function DetailPage() {
         onToggleAll={collapseStore.toggleAll}
       />
       <div className="flex-1">
-        <div className="w-full">
+        <div>
           {thread.messages.map((message, i) => {
             if (collapseStore.groupIndexes.has(i)) {
               if (i === groupStartIndex) {
@@ -361,7 +334,6 @@ export function DetailPage() {
                   <CollapsedMessagesIndicator
                     key={`collapsed-indicator`}
                     count={collapseStore.groupIndexes.size}
-                    startIndex={groupStartIndex!}
                     onExpand={() => collapseStore.expandGroup()}
                   />
                 )
@@ -385,10 +357,6 @@ export function DetailPage() {
   )
 }
 
-// MailSender component removed - reply functionality requires user authentication
-// which has been removed from this version. If you want to add reply functionality,
-// consider implementing it using Gmail's web interface directly.
-
 function DetailToolbar(props: {
   thread: EmailThread
   senderUrls: string[]
@@ -396,24 +364,29 @@ function DetailToolbar(props: {
   allCollapsed: boolean
   onToggleAll: () => void
 }) {
-  const navigate = useNavigate()
   const { thread } = props
   return (
-    <div className="flex items-center px-4 py-2 bg-background shadow-sm border-b border-border gap-2 sticky top-0 z-10">
-      <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => navigate({ to: '/' })}>
-        <ArrowLeftIcon className="w-4 h-4" />
-      </Button>
-      <a
-        className="font-medium text-foreground flex-1 min-w-0 truncate"
-        href={thread.url}
-        title="Open in Gmail"
-        onClick={(ev) => {
-          ev.preventDefault()
-          void openMailInWeb(thread.url).then(() => window.close())
-        }}
-      >
-        {thread.subject} ({thread.messageCount})
-      </a>
+    <PageHeader
+      back
+      title={
+        <a
+          className="min-w-0 hover:underline"
+          href={thread.url}
+          title="Open in Gmail"
+          onClick={(ev) => {
+            ev.preventDefault()
+            void openMailInWeb(thread.url).then(() => window.close())
+          }}
+        >
+          <PageTitle>
+            {thread.subject}
+            {thread.messageCount > 1 && (
+              <span className="ml-1.5 font-sans text-sm text-foreground/40 tabular-nums">{thread.messageCount}</span>
+            )}
+          </PageTitle>
+        </a>
+      }
+    >
       {props.messageCount > 1 && (
         <Button
           size="icon"
@@ -425,6 +398,6 @@ function DetailToolbar(props: {
         </Button>
       )}
       <MailActions thread={thread} senderUrls={props.senderUrls} />
-    </div>
+    </PageHeader>
   )
 }

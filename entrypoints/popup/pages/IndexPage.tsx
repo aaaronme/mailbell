@@ -18,7 +18,6 @@ import {
   SettingsIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { debugLog } from '@/lib/debugLog'
 import { RefreshIcon } from '@/components/extra/RefreshIcon'
 import { toast } from 'sonner'
 import {
@@ -28,7 +27,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { FaGithub } from 'react-icons/fa'
+import { GithubIcon } from '@/components/extra/GithubIcon'
+import { Avatar } from '@/components/extra/Avatar'
+import { PageHeader } from '@/components/extra/PageHeader'
 import type { EmailThread } from '@/lib/StateManager'
 import { getThreadCode } from '@/lib/otp'
 import { MailActions, urlsFromSender } from '@/components/extra/MailActions'
@@ -46,36 +47,34 @@ function MailItem({
 }) {
   return (
     <div
-      key={thread.url}
-      className="flex items-stretch gap-3 px-4 py-3 group transition relative border-b last:border-b-0 bg-background"
+      role="button"
+      tabIndex={0}
+      className="group flex cursor-pointer gap-3 border-b border-foreground/10 px-4 py-3 transition-colors hover:bg-foreground/5"
       onClick={onClick}
+      onKeyDown={(ev) => {
+        if (ev.key === 'Enter' && ev.target === ev.currentTarget) onClick()
+      }}
     >
-      {/* Avatar */}
-      <div className="w-10 h-10 flex items-center justify-center rounded-full bg-primary text-primary-foreground text-lg font-bold mt-1">
-        {thread.author.name.charAt(0)}
-      </div>
-      {/* Email content area */}
-      <div className="flex-1 min-w-0 flex flex-col justify-center">
-        {/* Title row: sender, subject, time/action buttons */}
-        <div className="flex items-center justify-between h-6 w-full space-x-2">
-          <span className="font-semibold truncate">
-            {thread.author.name} &lt;{thread.author.email}&gt;
+      <Avatar name={thread.author.name} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Sender, then the time - or, while hovered or focused, the actions in its place. */}
+        <div className="flex h-6 items-center gap-2">
+          <span className="min-w-0 flex-1 truncate">
+            <span className="font-medium">{thread.author.name}</span>
+            <span className="ml-1.5 text-foreground/40">{thread.author.email}</span>
           </span>
-          {/* Time and action buttons are mutually exclusive and both in this row */}
-          <span className="text-xs text-gray-400 whitespace-nowrap group-hover:hidden group-has-[[data-state=open]]:hidden block">
+          <span className="text-xs whitespace-nowrap text-foreground/40 tabular-nums group-hover:hidden group-focus-within:hidden group-has-[[data-state=open]]:hidden">
             {dayjs(thread.modified).format('YYYY-MM-DD HH:mm')}
           </span>
           <div
-            className="flex gap-1 group-hover:flex group-has-[[data-state=open]]:flex hidden"
+            className="-my-1 hidden group-hover:flex group-focus-within:flex group-has-[[data-state=open]]:flex"
             onClick={(ev) => ev.stopPropagation()}
           >
             <MailActions thread={thread} senderUrls={senderUrls} />
           </div>
         </div>
-        {/* Subject */}
-        <div className="font-bold text-sm truncate">{thread.title}</div>
-        {/* Summary */}
-        <div className="text-xs text-gray-400 truncate">{thread.summary}</div>
+        <div className="truncate text-foreground/80">{thread.title}</div>
+        <div className="truncate text-xs text-foreground/50">{thread.summary}</div>
       </div>
     </div>
   )
@@ -110,17 +109,18 @@ function CodeBar({ threads }: { threads: EmailThread[] }) {
   }, [newest])
   if (!codes.length) return null
   return (
-    <div className="sticky bottom-0 z-10 flex flex-col gap-1 px-4 py-2 bg-card border-t border-border">
+    <div className="sticky bottom-0 z-10 flex flex-col border-t border-foreground/10 bg-background">
       {codes.map(({ thread, code }, i) => (
         <button
           key={thread.url}
-          className="flex items-center gap-3 rounded-md px-3 py-1.5 bg-secondary hover:bg-secondary/80 text-left"
+          className="flex cursor-pointer items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-foreground/5"
           title={i === 0 ? 'Copy code (Enter)' : 'Copy code'}
           onClick={() => copyCode(code)}
         >
-          <span className="font-mono text-lg font-semibold tracking-widest">{code}</span>
-          <span className="flex-1 min-w-0 truncate text-xs text-muted-foreground">{thread.author.name}</span>
-          <CopyIcon className="w-4 h-4 shrink-0" />
+          {/* The code is the popup's one accent: what you came to the popup for. */}
+          <span className="font-mono text-base font-semibold tracking-widest text-bell">{code}</span>
+          <span className="min-w-0 flex-1 truncate text-xs text-foreground/60">{thread.author.name}</span>
+          <CopyIcon className="size-4 shrink-0 text-foreground/60" />
         </button>
       ))}
     </div>
@@ -159,14 +159,21 @@ function Toolbar() {
   const accountLabel = accounts.length === 1 ? accounts[0] : `${accounts.length} accounts`
 
   return (
-    <div className="flex items-center px-4 py-2 bg-card shadow-sm border-b border-border gap-2 sticky top-0 z-10">
-      {/* Gmail icon */}
-      <div className="flex items-center">
-        <img src="/icon/48.png" alt="Mailbell" className="w-6 h-6" />
-      </div>
-      <span className="font-medium text-foreground flex-1">
-        {accounts.length ? `${accountLabel} (${mailQuery.data!.threads.length})` : 'Mailbell'}
-      </span>
+    <PageHeader
+      title={
+        <>
+          <img src="/icon/48.png" alt="" className="size-5" />
+          {accounts.length ? (
+            <span className="truncate font-medium">
+              {accountLabel}
+              <span className="ml-1.5 text-foreground/40 tabular-nums">{mailQuery.data!.threads.length}</span>
+            </span>
+          ) : (
+            <span className="font-display text-base">Mailbell</span>
+          )}
+        </>
+      }
+    >
       {(mailQuery.data?.threads.length ?? 0) > 0 && (
         <Button
           size="icon"
@@ -181,11 +188,6 @@ function Toolbar() {
         size="icon"
         variant="ghost"
         title={'Refresh'}
-        className={cn(
-          'h-8 w-8',
-          refreshMutation.isPending &&
-            'animate-spin pointer-events-none opacity-50',
-        )}
         onClick={() => refreshMutation.mutate()}
         disabled={refreshMutation.isPending}
       >
@@ -243,13 +245,13 @@ function Toolbar() {
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
             <a href="https://github.com/aaaronme/mailbell" target="_blank">
-              <FaGithub />
+              <GithubIcon />
               GitHub
             </a>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-    </div>
+    </PageHeader>
   )
 }
 
@@ -272,19 +274,20 @@ function MailList({
       />
     ))
   if (accounts.length < 2) {
-    return <div className="w-full">{items(threads)}</div>
+    return <div>{items(threads)}</div>
   }
   // One section per account, in the order they were added, including accounts with nothing
   // unread - so every signed-in account is visibly being watched.
   return (
-    <div className="w-full">
+    <div>
       {accounts.map((account) => {
         const own = threads.filter((it) => it.account === account)
         return (
           <section key={account}>
-            <h2 className="sticky top-0 z-10 flex justify-between px-4 py-1 text-xs font-medium bg-muted text-muted-foreground border-b">
+            {/* top-12: sticks under the page header, not behind it. */}
+            <h2 className="sticky top-12 z-10 flex justify-between border-b border-foreground/10 bg-background px-4 py-1.5 text-xs font-medium text-foreground/60">
               <span className="truncate">{account}</span>
-              <span>{own.length}</span>
+              <span className="tabular-nums">{own.length}</span>
             </h2>
             {items(own)}
           </section>
@@ -300,10 +303,13 @@ function ReauthBanner() {
   const expired = (useAccounts().data ?? []).filter((it) => it.needsReauth)
   if (!expired.length) return null
   return (
-    <div className="flex flex-col gap-1 px-4 py-2 text-sm bg-destructive/10 border-b">
+    <div className="flex flex-col gap-1 border-b border-foreground/10 bg-destructive/10 px-4 py-2">
       {expired.map((account) => (
         <div key={account.email} className="flex items-center gap-2">
-          <span className="flex-1 truncate">{account.email} needs to sign in again</span>
+          <span className="min-w-0 flex-1 truncate">
+            <span className="font-medium">{account.email}</span>
+            <span className="text-foreground/60"> needs to sign in again</span>
+          </span>
           <Button size="sm" onClick={() => addAccount(account.email)}>
             Reconnect
           </Button>
@@ -318,11 +324,6 @@ export function IndexPage() {
   const mailQuery = useMailQuery()
 
   async function onSelectFeed(thread: EmailThread) {
-    // Diagnostic for the click-kills-the-popup bug: timestamps the click and
-    // identifies which thread was clicked, so a teardown moments later can be
-    // matched to the exact email (still retrievable in Gmail - it only got
-    // marked read, not deleted).
-    void debugLog('popup: mail clicked ->', thread.url)
     navigate({ to: '/detail/$threadUrl', params: { threadUrl: encodeURIComponent(thread.url) } })
     if (import.meta.env.PROD) {
       await bgMessager.sendMessage('gmailAction', {
@@ -339,15 +340,9 @@ export function IndexPage() {
       <div
         className={cn(
           'flex-1',
-          // Centering a child via h-full/100% here doesn't actually work -
-          // confirmed live in DevTools that h-full resolved to 36px (its own
-          // content height) instead of this element's real, DevTools-
-          // confirmed 331px. A flex item's flex-grow-resolved size isn't
-          // reliably treated as a definite height for a descendant's
-          // percentage height to resolve against. Centering directly on
-          // this element instead - which does have a real resolved height -
-          // sidesteps that entirely, no percentage resolution involved.
-          !mailQuery.data?.accounts.length && 'flex flex-col items-center justify-center',
+          // Centered on this element itself: a child's h-full doesn't resolve
+          // against a flex item's grown height.
+          !mailQuery.data?.accounts.length && 'flex flex-col items-center justify-center gap-4',
         )}
       >
         {mailQuery.data?.accounts.length ? (
@@ -357,7 +352,10 @@ export function IndexPage() {
             onSelectFeed={onSelectFeed}
           />
         ) : (
-          <Button onClick={() => addAccount()}>Sign in with Google</Button>
+          <>
+            <p className="font-display text-xl">Your inbox, from the toolbar</p>
+            <Button onClick={() => addAccount()}>Sign in with Google</Button>
+          </>
         )}
       </div>
       <CodeBar threads={mailQuery.data?.threads ?? []} />

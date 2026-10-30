@@ -1,8 +1,8 @@
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useNavigate } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeftIcon, CopyIcon } from 'lucide-react'
+import { CopyIcon } from 'lucide-react'
+import { PageHeader, PageTitle } from '@/components/extra/PageHeader'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { bgMessager } from '@/lib/messager'
@@ -26,8 +26,8 @@ export async function addAccount(loginHint?: string) {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-xs font-medium uppercase text-muted-foreground">{title}</h2>
+    <section className="flex flex-col gap-3 border-b border-foreground/10 p-4">
+      <h2 className="text-xs font-medium text-foreground/60">{title}</h2>
       {children}
     </section>
   )
@@ -44,11 +44,11 @@ function AccountsSection() {
 
   return (
     <Section title="Accounts">
-      {accounts.length === 0 && <p className="text-muted-foreground">No account signed in.</p>}
+      {accounts.length === 0 && <p className="text-foreground/60">No account signed in.</p>}
       {accounts.map((account) => (
         <div key={account.email} className="flex items-center gap-2">
-          <div className="flex-1 min-w-0">
-            <div className="truncate">{account.email}</div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-medium">{account.email}</div>
             {account.needsReauth && <div className="text-xs text-destructive">Signed out by Google</div>}
           </div>
           {account.needsReauth && (
@@ -90,24 +90,24 @@ function ClientSection() {
 
   return (
     <Section title="Google OAuth client">
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-foreground/60">
         {clientQuery.data
           ? 'Using your own client.'
           : hasBuiltIn
             ? "Using Mailbell's built-in client. Use your own Google Cloud client instead to skip the unverified-app warning and its user limit."
             : 'This build has no built-in client: add your own Google Cloud client to sign in.'}{' '}
         <a
-          className="underline"
+          className="text-foreground underline underline-offset-2"
           href="https://github.com/aaaronme/mailbell/blob/main/docs/SETUP.md"
           target="_blank"
         >
           How to create one
         </a>
       </p>
-      <label className="flex flex-col gap-1 text-xs">
+      <label className="flex flex-col gap-1.5 text-xs text-foreground/60">
         Authorized redirect URI
-        <div className="flex gap-1">
-          <Input readOnly value={redirectUrl} className="text-xs" onFocus={(ev) => ev.target.select()} />
+        <div className="flex items-center gap-1">
+          <Input readOnly value={redirectUrl} className="font-mono text-xs" onFocus={(ev) => ev.target.select()} />
           <Button
             size="icon"
             variant="ghost"
@@ -121,11 +121,11 @@ function ClientSection() {
           </Button>
         </div>
       </label>
-      <label className="flex flex-col gap-1 text-xs">
+      <label className="flex flex-col gap-1.5 text-xs text-foreground/60">
         Client ID
         <Input value={clientId} onChange={(ev) => setClientId(ev.target.value)} placeholder="….apps.googleusercontent.com" />
       </label>
-      <label className="flex flex-col gap-1 text-xs">
+      <label className="flex flex-col gap-1.5 text-xs text-foreground/60">
         Client secret
         <Input type="password" value={clientSecret} onChange={(ev) => setClientSecret(ev.target.value)} />
       </label>
@@ -140,25 +140,17 @@ function ClientSection() {
         )}
       </div>
       {/* No confirm(): Firefox's toolbar popup can't show dialogs. */}
-      <p className="text-xs text-muted-foreground">Changing the client signs out every account.</p>
+      <p className="text-xs text-foreground/40">Changing the client signs out every account.</p>
     </Section>
   )
 }
 
 export function SettingsPage() {
-  const navigate = useNavigate()
   return (
-    <div className="flex flex-col min-h-screen">
-      <div className="flex items-center px-4 py-2 bg-background shadow-sm border-b border-border gap-2 sticky top-0 z-10">
-        <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => navigate({ to: '/' })}>
-          <ArrowLeftIcon className="w-4 h-4" />
-        </Button>
-        <span className="font-medium text-foreground flex-1">Settings</span>
-      </div>
-      <div className="flex flex-col gap-6 p-4 text-sm">
-        <AccountsSection />
-        <ClientSection />
-      </div>
+    <div className="flex min-h-screen flex-col">
+      <PageHeader back title={<PageTitle>Settings</PageTitle>} />
+      <AccountsSection />
+      <ClientSection />
     </div>
   )
 }
