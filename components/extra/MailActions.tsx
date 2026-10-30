@@ -12,6 +12,7 @@ import type { EmailThread } from '@/lib/StateManager'
 import { hasUnsubscribeLink } from '@/lib/unsubscribe'
 import { mailQueryKey } from '@/lib/useMailQuery'
 import { useQueryClient } from '@tanstack/react-query'
+import { useShortcuts } from '@/lib/useShortcuts'
 import { ArchiveIcon, BanIcon, ExternalLinkIcon, MailMinusIcon, MailOpenIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -21,8 +22,17 @@ export function urlsFromSender(threads: EmailThread[], thread: EmailThread): str
   return threads.filter((it) => it.author.email.toLowerCase() === sender).map((it) => it.url)
 }
 
-// The per-mail actions, shared by the list row and the opened mail.
-export function MailActions({ thread, senderUrls }: { thread: EmailThread; senderUrls: string[] }) {
+// The per-mail actions, shared by the list row and the opened mail. With
+// `shortcuts`, Gmail's keys run them too (see useShortcuts for a function).
+export function MailActions({
+  thread,
+  senderUrls,
+  shortcuts = false,
+}: {
+  thread: EmailThread
+  senderUrls: string[]
+  shortcuts?: boolean | (() => boolean)
+}) {
   const queryClient = useQueryClient()
   async function gmailAction(data: GmailAction) {
     await bgMessager.sendMessage('gmailAction', data)
@@ -62,6 +72,15 @@ export function MailActions({ thread, senderUrls }: { thread: EmailThread; sende
     )
   }
   const one = (cmd: 'archive' | 'deleteMail' | 'markAsRead' | 'markAsSpam') => ({ cmd, url: thread.url })
+  useShortcuts(
+    {
+      e: () => run('Archive', one('archive')),
+      '#': () => run('Delete', one('deleteMail')),
+      I: () => run('Mark as read', one('markAsRead')),
+      '!': () => run('Mark as spam', one('markAsSpam')),
+    },
+    shortcuts,
+  )
   const all = (cmd: 'archiveAll' | 'deleteAll') => ({ cmd, urls: senderUrls })
   const othersFromSender = senderUrls.length > 1
   const canUnsubscribe = hasUnsubscribeLink(thread.messages.at(-1)?.contentHtml ?? '')
@@ -70,7 +89,7 @@ export function MailActions({ thread, senderUrls }: { thread: EmailThread; sende
       <Button
         size="icon"
         variant="ghost"
-        title={'Archive'}
+        title="Archive (e)"
         onClick={() => run('Archive', one('archive'))}
       >
         <ArchiveIcon />
@@ -78,7 +97,7 @@ export function MailActions({ thread, senderUrls }: { thread: EmailThread; sende
       <Button
         size="icon"
         variant="ghost"
-        title={'Trash'}
+        title="Trash (#)"
         onClick={() => run('Delete', one('deleteMail'))}
       >
         <Trash2Icon />
@@ -86,7 +105,7 @@ export function MailActions({ thread, senderUrls }: { thread: EmailThread; sende
       <Button
         size="icon"
         variant="ghost"
-        title={'Mark as read'}
+        title="Mark as read (Shift+I)"
         onClick={() => run('Mark as read', one('markAsRead'))}
       >
         <MailOpenIcon />
@@ -132,7 +151,7 @@ export function MailActions({ thread, senderUrls }: { thread: EmailThread; sende
       <Button
         size="icon"
         variant="ghost"
-        title={'Spam'}
+        title="Spam (!)"
         onClick={() => run('Mark as spam', one('markAsSpam'))}
       >
         <BanIcon />

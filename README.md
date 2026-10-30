@@ -11,6 +11,7 @@ Mailbell signs in with Google OAuth and talks to the official [Gmail API](https:
 - Several Google accounts side by side.
 - Read whole threads in the popup, including HTML mail, inline images and attachments, with automatic dark mode.
 - Archive, delete, mark as read or unread, or report spam, for one thread or in bulk.
+- Gmail's keyboard shortcuts: `j`/`k` to move, `Enter` to open, `e` archive, `#` trash, `Shift+I` mark as read, `!` spam, `u` back, `c` compose.
 - One-click unsubscribe (RFC 8058) when the sender supports it.
 - One-time codes from verification emails shown ready to copy.
 

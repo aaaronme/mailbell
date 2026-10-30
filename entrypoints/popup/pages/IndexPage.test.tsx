@@ -72,6 +72,34 @@ describe('IndexPage', () => {
     expect(queryClient.getQueryData<any>(mailQueryKey)?.threads[0]?.url).toBe('b')
   })
 
+  it('moves with j/k and archives the focused mail with e, then focuses the next', async () => {
+    const threads = ['a', 'b', 'c'].map((url) => ({ ...makeThread(url), account: 'me@example.com' }))
+    await browser.storage.local.set({ accounts: ['me@example.com'], threads })
+    const send = vi.spyOn(bgMessager, 'sendMessage').mockImplementation(async (_type, data: any) => {
+      // The background drops the archived thread.
+      await browser.storage.local.set({ threads: threads.filter((it) => it.url !== data.url) })
+    })
+    const screen = await render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={createAppRouter(['/'])} />
+      </QueryClientProvider>,
+    )
+    await expect.element(screen.getByText('Test').first()).toBeVisible()
+    const press = (key: string) =>
+      document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+    const focused = () => document.activeElement?.getAttribute('data-mail-row')
+
+    press('j')
+    expect(focused()).toBe('a')
+    press('j')
+    press('j')
+    press('k')
+    expect(focused()).toBe('b')
+    press('e')
+    expect(send).toHaveBeenCalledWith('gmailAction', { cmd: 'archive', url: 'b' })
+    await vi.waitUntil(() => focused() === 'c')
+  })
+
   it('shows the toolbar (with Debug Log access) even when not logged in', async () => {
     // Regression test: the toolbar used to only render once mailQuery.data
     // had an email, so a separate "Debug Log" button had to be bolted onto

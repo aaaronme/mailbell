@@ -3,7 +3,7 @@ import { openMailInWeb, newEmail, getActiveInboxUrl } from '@/lib/api/gmail'
 import { bgMessager } from '@/lib/messager'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { mailQueryKey, useMailQuery } from '@/lib/useMailQuery'
 import dayjs from 'dayjs'
 import {
@@ -34,6 +34,7 @@ import { getThreadCode } from '@/lib/otp'
 import { MailActions, urlsFromSender } from '@/components/extra/MailActions'
 import { useAccounts } from '@/lib/useAccounts'
 import { addAccount } from './SettingsPage'
+import { useShortcuts } from '@/lib/useShortcuts'
 
 function MailItem({
   thread,
@@ -44,10 +45,13 @@ function MailItem({
   senderUrls: string[]
   onClick: () => void
 }) {
+  const row = useRef<HTMLDivElement>(null)
   return (
     <div
+      ref={row}
       role="button"
       tabIndex={0}
+      data-mail-row={thread.url}
       className="group flex cursor-pointer gap-3 border-b border-foreground/10 px-4 py-3 transition-colors hover:bg-foreground/5"
       onClick={onClick}
       onKeyDown={(ev) => {
@@ -69,7 +73,7 @@ function MailItem({
             className="-my-1 hidden group-hover:flex group-focus-within:flex group-has-[[data-state=open]]:flex"
             onClick={(ev) => ev.stopPropagation()}
           >
-            <MailActions thread={thread} senderUrls={senderUrls} />
+            <MailActions thread={thread} senderUrls={senderUrls} shortcuts={() => !!row.current?.contains(document.activeElement)} />
           </div>
         </div>
         <div className="truncate text-foreground/80">{thread.title}</div>
@@ -206,7 +210,7 @@ function Toolbar() {
       <Button
         size="icon"
         variant="ghost"
-        title={'New email'}
+        title="New email (c)"
         onClick={newEmail}
       >
         <MailPlusIcon />
@@ -247,6 +251,8 @@ function Toolbar() {
   )
 }
 
+const mailRows = () => [...document.querySelectorAll<HTMLElement>('[data-mail-row]')]
+
 function MailList({
   accounts,
   threads,
@@ -256,14 +262,36 @@ function MailList({
   threads: EmailThread[]
   onSelectFeed: (thread: EmailThread) => void
 }) {
+  // j/k move focus between rows, from the top if none has it. The action
+  // shortcuts act on the row that has focus (MailItem).
+  function move(by: number) {
+    const rows = mailRows()
+    const current = rows.findIndex((it) => it.contains(document.activeElement))
+    const index = current === -1 ? 0 : current + by
+    rows[Math.max(0, Math.min(index, rows.length - 1))]?.focus()
+  }
+  // The row focused last, to refocus where it was once it's gone.
+  const [selected, setSelected] = useState<{ url: string; index: number } | null>(null)
+  useShortcuts({ j: () => move(1), k: () => move(-1), ArrowDown: () => move(1), ArrowUp: () => move(-1), c: newEmail })
+  // A mail archived or deleted from the keyboard leaves the list: carry on
+  // with the one that took its place.
+  useEffect(() => {
+    if (!selected || threads.some((it) => it.url === selected.url)) return
+    const rows = mailRows()
+    rows[Math.min(selected.index, rows.length - 1)]?.focus()
+  }, [threads, selected])
   const items = (list: EmailThread[]) =>
     list.map((thread) => (
-      <MailItem
+      <div
         key={thread.url}
-        thread={thread}
-        senderUrls={urlsFromSender(threads, thread)}
-        onClick={() => onSelectFeed(thread)}
-      />
+        onFocus={(ev) => setSelected({ url: thread.url, index: mailRows().indexOf(ev.currentTarget.firstElementChild as HTMLElement) })}
+      >
+        <MailItem
+          thread={thread}
+          senderUrls={urlsFromSender(threads, thread)}
+          onClick={() => onSelectFeed(thread)}
+        />
+      </div>
     ))
   if (accounts.length < 2) {
     return <div>{items(threads)}</div>

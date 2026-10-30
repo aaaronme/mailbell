@@ -397,7 +397,7 @@ function DetailToolbar(props: {
           {props.allCollapsed ? <ChevronsUpDownIcon /> : <ChevronsDownUpIcon />}
         </Button>
       )}
-      <MailActions thread={thread} senderUrls={props.senderUrls} />
+      <MailActions thread={thread} senderUrls={props.senderUrls} shortcuts />
     </PageHeader>
   )
 }

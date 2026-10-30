@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { useNavigate } from '@tanstack/react-router'
 import { ArrowLeftIcon } from 'lucide-react'
+import { useShortcuts } from '@/lib/useShortcuts'
 
 // The sticky bar every page starts with. Sub-pages pass `back` for the arrow
 // home; actions go in children, after the title.
@@ -14,10 +15,11 @@ export function PageHeader({
   children?: React.ReactNode
 }) {
   const navigate = useNavigate()
+  useShortcuts({ u: () => navigate({ to: '/' }) }, !!back)
   return (
     <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-1 border-b border-foreground/10 bg-background px-2">
       {back && (
-        <Button size="icon" variant="ghost" title="Back" onClick={() => navigate({ to: '/' })}>
+        <Button size="icon" variant="ghost" title="Back (u)" onClick={() => navigate({ to: '/' })}>
           <ArrowLeftIcon />
         </Button>
       )}
