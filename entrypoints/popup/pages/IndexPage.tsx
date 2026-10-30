@@ -14,7 +14,6 @@ import {
   MailPlusIcon,
   BugIcon,
   CopyIcon,
-  BellIcon,
   SettingsIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -226,13 +225,6 @@ function Toolbar() {
               Popout
             </a>
           </DropdownMenuItem>
-          {/* Only Firefox's background page can play audio (see lib/sound.ts). */}
-          {import.meta.env.FIREFOX && (
-            <DropdownMenuItem onClick={() => navigate({ to: '/sound' })}>
-              <BellIcon />
-              Notification sound
-            </DropdownMenuItem>
-          )}
           <DropdownMenuItem onClick={() => navigate({ to: '/settings' })}>
             <SettingsIcon />
             Settings

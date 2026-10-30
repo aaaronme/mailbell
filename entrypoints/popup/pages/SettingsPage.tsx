@@ -8,8 +8,15 @@ import { toast } from 'sonner'
 import { bgMessager } from '@/lib/messager'
 import { getBuiltInClient, getCustomClient } from '@/lib/auth/oauth'
 import { useAccounts } from '@/lib/useAccounts'
+import { Switch } from '@/components/ui/switch'
+import { cn } from '@/lib/utils'
+import { getSettings, POLL_MINUTES, updateSettings, type Settings } from '@/lib/settings'
+import { clearNotificationSound, getNotificationSound, playSound, setNotificationSound } from '@/lib/sound'
+import { isPopoutTab } from '../view'
 
 const clientQueryKey = ['oauthClient']
+const settingsQueryKey = ['settings']
+const soundQueryKey = ['notificationSound']
 
 // Starts Google's sign-in in the background. In the toolbar popup the call
 // never resolves here: the popup closes as soon as the sign-in window opens,
@@ -67,6 +74,131 @@ function AccountsSection() {
         </Button>
       </div>
     </Section>
+  )
+}
+
+// A label on the left, its control on the right, an optional hint below.
+function Row({ label, hint, children }: { label: React.ReactNode; hint?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex min-h-8 items-center gap-3">
+        <div className="min-w-0 flex-1">{label}</div>
+        {children}
+      </div>
+      {hint && <p className="text-xs text-foreground/40">{hint}</p>}
+    </div>
+  )
+}
+
+function formatMinutes(minutes: number) {
+  return minutes < 1 ? `${minutes * 60} s` : `${minutes} min`
+}
+
+function NotificationsSection() {
+  const queryClient = useQueryClient()
+  const settings = useQuery({ queryKey: settingsQueryKey, queryFn: getSettings }).data
+
+  async function update(patch: Partial<Settings>) {
+    await updateSettings(patch)
+    await queryClient.invalidateQueries({ queryKey: settingsQueryKey })
+  }
+
+  if (!settings) return null
+  return (
+    <Section title="Notifications">
+      <Row label="Desktop notifications" hint={settings.notifications ? undefined : 'New mail only updates the unread count on the toolbar icon.'}>
+        <Switch checked={settings.notifications} onCheckedChange={(notifications) => update({ notifications })} />
+      </Row>
+      {/* Only Firefox's background page can play audio (see lib/sound.ts). */}
+      {import.meta.env.FIREFOX && settings.notifications && <SoundRow />}
+      <Row label="Check for new mail every">
+        <div className="flex gap-1">
+          {POLL_MINUTES.map((minutes) => (
+            <Button
+              key={minutes}
+              size="sm"
+              variant={settings.pollMinutes === minutes ? 'default' : 'ghost'}
+              className="tabular-nums"
+              onClick={() => update({ pollMinutes: minutes })}
+            >
+              {formatMinutes(minutes)}
+            </Button>
+          ))}
+        </div>
+      </Row>
+    </Section>
+  )
+}
+
+function SoundRow() {
+  const queryClient = useQueryClient()
+  const sound = useQuery({ queryKey: soundQueryKey, queryFn: getNotificationSound }).data ?? null
+
+  async function pick(file: File | undefined) {
+    if (!file) return
+    try {
+      const picked = await setNotificationSound(file)
+      await queryClient.invalidateQueries({ queryKey: soundQueryKey })
+      await playSound(picked)
+      toast.success('Sound saved')
+    } catch (err) {
+      console.error(err)
+      toast.error(String(err))
+    }
+  }
+
+  async function remove() {
+    await clearNotificationSound()
+    await queryClient.invalidateQueries({ queryKey: soundQueryKey })
+  }
+
+  return (
+    <Row
+      label={
+        <>
+          Sound <span className={cn('ml-1.5', sound ? 'text-foreground/60' : 'text-foreground/40')}>{sound?.name ?? 'System sound'}</span>
+        </>
+      }
+      hint={
+        sound
+          ? 'To avoid hearing two sounds, turn off "Play sound for notifications" for Firefox in macOS System Settings → Notifications.'
+          : undefined
+      }
+    >
+      <div className="flex gap-1">
+        {sound && (
+          <>
+            <Button size="sm" variant="ghost" onClick={() => playSound(sound)}>
+              Test
+            </Button>
+            <Button size="sm" variant="ghost" onClick={remove}>
+              Remove
+            </Button>
+          </>
+        )}
+        {/* Firefox closes the toolbar popup as soon as a file dialog opens,
+            so the picker only works in the standalone tab. */}
+        {isPopoutTab ? (
+          <Button size="sm" variant="secondary" asChild>
+            <label>
+              Choose file
+              <input type="file" accept="audio/*" className="hidden" onChange={(ev) => pick(ev.target.files?.[0])} />
+            </label>
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              void browser.tabs.create({ url: browser.runtime.getURL('/popup.html?view=tab&page=/settings') })
+              window.close()
+            }}
+          >
+            Choose file
+          </Button>
+        )}
+      </div>
+    </Row>
   )
 }
 
@@ -150,6 +282,7 @@ export function SettingsPage() {
     <div className="flex min-h-screen flex-col">
       <PageHeader back title={<PageTitle>Settings</PageTitle>} />
       <AccountsSection />
+      <NotificationsSection />
       <ClientSection />
     </div>
   )

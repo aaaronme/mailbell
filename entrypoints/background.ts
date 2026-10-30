@@ -24,6 +24,7 @@ import { registerActionMenus } from '@/lib/menu'
 import { menus } from '@/lib/constants'
 import { debugLog } from '@/lib/debugLog'
 import { playNotificationSound } from '@/lib/sound'
+import { getSettings, isSettingsChange } from '@/lib/settings'
 
 // Update badge
 async function updateBadge(unreadCount: number) {
@@ -50,6 +51,7 @@ async function sendNotification(stateManager: StateManager, feed: EmailThread) {
   // Claim it before the first await: a fetch overlapping this one (the popup
   // opening mid-poll) otherwise saw it as new too and played the sound again.
   stateManager.notifiedEmails.add(feed.url)
+  if (!(await getSettings()).notifications) return
   await debugLog('sendNotification ->', feed.url)
 
   await browser.notifications.create(notificationId, {
@@ -266,12 +268,18 @@ async function start() {
 
   // A failed startup fetch (network not up yet after waking) is retried by
   // the alarm half a minute later.
-  await browser.alarms.create('fetchThreads', { periodInMinutes: 0.5 })
+  await createAlarm()
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (isSettingsChange(changes, area)) void createAlarm()
+  })
   await stateManager.fetchThreads()
 }
 
+// Creating an alarm under the same name replaces it, with the new period.
+async function createAlarm() {
+  await browser.alarms.create('fetchThreads', { periodInMinutes: (await getSettings()).pollMinutes })
+}
+
 async function ensureAlarm() {
-  if (!(await browser.alarms.get('fetchThreads'))) {
-    await browser.alarms.create('fetchThreads', { periodInMinutes: 0.5 })
-  }
+  if (!(await browser.alarms.get('fetchThreads'))) await createAlarm()
 }

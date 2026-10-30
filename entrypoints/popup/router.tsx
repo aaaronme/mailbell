@@ -11,7 +11,6 @@ import { useEffect } from 'react'
 import { IndexPage } from './pages/IndexPage'
 import { DetailPage } from './pages/DetailPage'
 import { DebugLogPage } from './pages/DebugLogPage'
-import { SoundPage } from './pages/SoundPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { fetchMailQuery, mailQueryKey } from '@/lib/useMailQuery'
 import { queryClient } from '@/lib/queryClient'
@@ -88,19 +87,13 @@ export const debugRoute = createRoute({
   component: DebugLogPage,
 })
 
-export const soundRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/sound',
-  component: SoundPage,
-})
-
 export const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/settings',
   component: SettingsPage,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, detailRoute, debugRoute, soundRoute, settingsRoute])
+const routeTree = rootRoute.addChildren([indexRoute, detailRoute, debugRoute, settingsRoute])
 
 // A factory rather than exporting one fixed instance: tests need their own
 // router with a specific starting location (e.g. straight into
@@ -115,7 +108,7 @@ export function createAppRouter(initialEntries: string[] = ['/']) {
   })
 }
 
-// ?page= opens a tab straight on a route (the sound picker needs a real tab).
+// ?page= opens a tab straight on a route (the sound picker in Settings needs a real tab).
 export const router = createAppRouter([new URLSearchParams(location.search).get('page') ?? '/'])
 
 declare module '@tanstack/react-router' {
