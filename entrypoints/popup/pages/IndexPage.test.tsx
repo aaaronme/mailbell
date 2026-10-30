@@ -47,6 +47,21 @@ describe('IndexPage', () => {
     expect(headers).toEqual(['a@example.com2', 'b@example.com0'])
   })
 
+  it("opens an account's own inbox from its heading, not the first account's", async () => {
+    await browser.storage.local.set({ accounts: ['a@example.com', 'b@example.com'], threads: [] })
+    const openTab = vi.spyOn(fakeBrowser.tabs, 'create').mockResolvedValue({} as never)
+    vi.spyOn(window, 'close').mockImplementation(() => {})
+    const screen = await render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={createAppRouter(['/'])} />
+      </QueryClientProvider>,
+    )
+    await screen.getByTitle('Open b@example.com in Gmail').click()
+    expect(openTab).toHaveBeenCalledWith({ url: 'https://mail.google.com/mail/?authuser=b%40example.com#inbox' })
+    // One button for "the" inbox would be ambiguous with two accounts.
+    expect(document.querySelector('[title="Open in Gmail"]')).toBeNull()
+  })
+
   it('refresh button pulls fresh state directly instead of depending solely on the background push', async () => {
     // Regression test: the refresh button used to only send 'refreshThreads'
     // and wait for background's 'refreshPopup' push, which is lost if the

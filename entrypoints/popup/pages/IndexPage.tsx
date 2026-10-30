@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button'
-import { openMailInWeb, newEmail, getActiveInboxUrl } from '@/lib/api/gmail'
+import { openMailInWeb, newEmail, inboxUrl } from '@/lib/api/gmail'
 import { bgMessager } from '@/lib/messager'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
@@ -196,17 +196,17 @@ function Toolbar() {
       >
         <RefreshIcon loading={refreshMutation.isPending} />
       </Button>
-      <Button
-        size="icon"
-        variant="ghost"
-        title={'Open in Gmail'}
-        onClick={async () => {
-          await openMailInWeb(await getActiveInboxUrl())
-          window.close()
-        }}
-      >
-        <ExternalLinkIcon />
-      </Button>
+      {/* With several accounts, each account's heading opens its own inbox. */}
+      {accounts.length < 2 && (
+        <Button
+          size="icon"
+          variant="ghost"
+          title={'Open in Gmail'}
+          onClick={() => openInbox(accounts[0])}
+        >
+          <ExternalLinkIcon />
+        </Button>
+      )}
       <Button
         size="icon"
         variant="ghost"
@@ -305,9 +305,17 @@ function MailList({
         return (
           <section key={account}>
             {/* top-12: sticks under the page header, not behind it. */}
-            <h2 className="sticky top-12 z-10 flex justify-between border-b border-foreground/10 bg-background px-4 py-1.5 text-xs font-medium text-foreground/60">
-              <span className="truncate">{account}</span>
-              <span className="tabular-nums">{own.length}</span>
+            <h2 className="sticky top-12 z-10 border-b border-foreground/10 bg-background text-xs font-medium text-foreground/60">
+              <button
+                type="button"
+                title={`Open ${account} in Gmail`}
+                onClick={() => openInbox(account)}
+                className="group flex w-full items-center gap-1.5 px-4 py-1.5 text-left transition-colors hover:bg-foreground/5"
+              >
+                <span className="truncate">{account}</span>
+                <ExternalLinkIcon className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
+                <span className="ml-auto tabular-nums">{own.length}</span>
+              </button>
             </h2>
             {items(own)}
           </section>
@@ -381,4 +389,9 @@ export function IndexPage() {
       <CodeBar threads={mailQuery.data?.threads ?? []} />
     </div>
   )
+}
+
+async function openInbox(account: string | undefined) {
+  await openMailInWeb(account ? inboxUrl(account) : 'https://mail.google.com/mail/')
+  window.close()
 }
