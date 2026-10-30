@@ -113,15 +113,28 @@ export class StateManager {
     return this.threads.filter((it) => !this.viewedEmails.has(it.url))
   }
 
-  async fetchThreads(force = false) {
+  // One fetch at a time: two overlapping ones (a poll and the popup opening)
+  // each merge into this.threads, and the one finishing last could bring back
+  // what the other had just dropped. A fetch asked for meanwhile runs next.
+  private fetching: Promise<void> = Promise.resolve()
+  fetchThreads(force = false): Promise<void> {
+    const run = this.fetching.then(() => this.fetchThreadsNow(force))
+    this.fetching = run.catch(() => {})
+    return run
+  }
+
+  private async fetchThreadsNow(force: boolean) {
     if (!navigator.onLine) {
       await debugLog('fetchThreads: skipped, offline')
       return
     }
     try {
       await this.restored
+      const wasLoggedIn = this.isLoggedIn
       this.isLoggedIn = await this.api.checkLoginStatus()
-      await debugLog('fetchThreads: checkLoginStatus ->', this.isLoggedIn)
+      // Only changes: with no account this runs every poll, and would fill
+      // the debug log with nothing else.
+      if (this.isLoggedIn !== wasLoggedIn) await debugLog('fetchThreads: checkLoginStatus ->', this.isLoggedIn)
       if (!this.isLoggedIn) {
         // The last account was removed or needs a fresh sign-in.
         this.accounts = []

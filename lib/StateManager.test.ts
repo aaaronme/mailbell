@@ -518,6 +518,35 @@ describe('StateManager', () => {
     })
   })
 
+  describe('overlapping fetches', () => {
+    it('run one after the other, so the later one sees what the first did', async () => {
+      api.checkLoginStatus.mockImplementation(async () => true)
+      api.getThreadMail.mockImplementation(async () => THREAD_DETAILS)
+      let inFlight = 0
+      let overlapped = false
+      api.getAllRSS.mockImplementation(async () => {
+        overlapped ||= inFlight++ > 0
+        await new Promise((r) => setTimeout(r, 10))
+        inFlight--
+        return [{ email: 'a@test.com', feeds: [feed] }] satisfies RSSInfo[]
+      })
+      const stateManager = new StateManager(api)
+      await Promise.all([stateManager.fetchThreads(), stateManager.fetchThreads()])
+      expect(overlapped).toBe(false)
+      // The second found the thread the first fetched and kept it.
+      expect(api.getThreadMail).toHaveBeenCalledOnce()
+    })
+
+    it('a failed fetch does not block the next one', async () => {
+      api.checkLoginStatus.mockImplementation(async () => true)
+      api.getAllRSS.mockRejectedValueOnce(new Error('down'))
+      api.getAllRSS.mockImplementation(async () => [] satisfies RSSInfo[])
+      const stateManager = new StateManager(api)
+      await expect(stateManager.fetchThreads()).rejects.toThrow('down')
+      await expect(stateManager.fetchThreads()).resolves.toBeUndefined()
+    })
+  })
+
   describe('after a restart', () => {
     it('keeps the stored threads instead of fetching their mail again', async () => {
       api.checkLoginStatus.mockImplementation(async () => true)

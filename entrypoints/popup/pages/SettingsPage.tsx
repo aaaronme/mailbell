@@ -6,7 +6,8 @@ import { PageHeader, PageTitle } from '@/components/extra/PageHeader'
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { bgMessager } from '@/lib/messager'
-import { getBuiltInClient, getCustomClient } from '@/lib/auth/oauth'
+import { getCustomClient } from '@/lib/auth/oauth'
+import { ClientForm, customClientQueryKey, RedirectUri, SETUP_GUIDE_URL, useClient } from '@/components/extra/ClientForm'
 import { useAccounts } from '@/lib/useAccounts'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
@@ -32,7 +33,6 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { isPopoutTab } from '../view'
 
-const clientQueryKey = ['oauthClient']
 const settingsQueryKey = ['settings']
 const soundQueryKey = ['notificationSound']
 
@@ -70,7 +70,7 @@ function AccountsSection() {
 
   return (
     <Section title="Accounts">
-      {accounts.length === 0 && <p className="text-foreground/60">No account signed in.</p>}
+      {accounts.length === 0 && <p className="text-foreground/60">No accounts yet. Add one to see your inbox here.</p>}
       {accounts.map((account) => (
         <div key={account.email} className="flex items-center gap-2">
           <div className="min-w-0 flex-1">
@@ -78,7 +78,7 @@ function AccountsSection() {
             {account.needsReauth && <div className="text-xs text-destructive">Signed out by Google</div>}
           </div>
           {account.needsReauth ? (
-            <Button size="sm" onClick={() => addAccount(account.email)}>
+            <Button size="sm" variant="secondary" onClick={() => addAccount(account.email)}>
               Reconnect
             </Button>
           ) : (
@@ -90,7 +90,7 @@ function AccountsSection() {
         </div>
       ))}
       <div>
-        <Button size="sm" onClick={() => addAccount()}>
+        <Button size="sm" variant="secondary" onClick={() => addAccount()}>
           Add account
         </Button>
       </div>
@@ -186,7 +186,7 @@ function NotificationsSection() {
               hint={
                 settings.sound === 'system'
                   ? undefined
-                  : 'To avoid hearing two sounds, turn off "Play sound for notifications" for Firefox in macOS System Settings → Notifications.'
+                  : 'To avoid hearing two sounds, turn off “Play sound for notifications” for Firefox in macOS System Settings → Notifications.'
               }
             >
               <SoundSelect value={settings.sound} onChange={(sound) => update({ sound: sound ?? 'system' })} />
@@ -283,7 +283,7 @@ function SoundSelect({
       choose('custom')
     } catch (err) {
       console.error(err)
-      toast.error(String(err))
+      toast.error(`Couldn't use that file: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -332,74 +332,30 @@ function SoundItem({ label, checked, onSelect }: { label: string; checked: boole
 }
 
 function ClientSection() {
-  const queryClient = useQueryClient()
-  const clientQuery = useQuery({ queryKey: clientQueryKey, queryFn: getCustomClient })
-  const [clientId, setClientId] = useState('')
-  const [clientSecret, setClientSecret] = useState('')
-  useEffect(() => {
-    setClientId(clientQuery.data?.clientId ?? '')
-    setClientSecret(clientQuery.data?.clientSecret ?? '')
-  }, [clientQuery.data])
-  const redirectUrl = browser.identity.getRedirectURL()
-  const hasBuiltIn = !!getBuiltInClient()
-
-  async function save(next: { clientId: string; clientSecret: string } | null) {
-    await bgMessager.sendMessage('setOAuthClient', next)
-    await queryClient.invalidateQueries()
-    toast.success('OAuth client saved')
-  }
-
+  const clientQuery = useClient()
+  const customQuery = useQuery({ queryKey: customClientQueryKey, queryFn: getCustomClient })
   return (
     <Section title="Google OAuth client">
       <p className="text-xs text-foreground/60">
-        {clientQuery.data
+        {customQuery.data
           ? 'Using your own client.'
-          : hasBuiltIn
+          : clientQuery.data
             ? "Using Mailbell's built-in client. Use your own Google Cloud client instead to skip the unverified-app warning and its user limit."
-            : 'This build has no built-in client: add your own Google Cloud client to sign in.'}{' '}
+            : 'No client yet: add your own Google Cloud client to sign in.'}{' '}
         <a
-          className="text-foreground underline underline-offset-2"
-          href="https://github.com/aaaronme/mailbell/blob/main/docs/SETUP.md"
+          className="text-foreground underline underline-offset-2 transition-colors hover:text-foreground/80"
+          href={SETUP_GUIDE_URL}
           target="_blank"
+          rel="noreferrer"
         >
           How to create one
         </a>
       </p>
-      <label className="flex flex-col gap-1.5 text-xs text-foreground/60">
+      <div className="flex flex-col gap-1.5 text-xs text-foreground/60">
         Authorized redirect URI
-        <div className="flex items-center gap-1">
-          <Input readOnly value={redirectUrl} className="font-mono text-xs" onFocus={(ev) => ev.target.select()} />
-          <Button
-            size="icon"
-            variant="ghost"
-            title="Copy"
-            onClick={async () => {
-              await navigator.clipboard.writeText(redirectUrl)
-              toast.success('Copied')
-            }}
-          >
-            <CopyIcon />
-          </Button>
-        </div>
-      </label>
-      <label className="flex flex-col gap-1.5 text-xs text-foreground/60">
-        Client ID
-        <Input value={clientId} onChange={(ev) => setClientId(ev.target.value)} placeholder="….apps.googleusercontent.com" />
-      </label>
-      <label className="flex flex-col gap-1.5 text-xs text-foreground/60">
-        Client secret
-        <Input type="password" value={clientSecret} onChange={(ev) => setClientSecret(ev.target.value)} />
-      </label>
-      <div className="flex gap-2">
-        <Button size="sm" disabled={!clientId.trim()} onClick={() => save({ clientId, clientSecret })}>
-          Save
-        </Button>
-        {clientQuery.data && (
-          <Button size="sm" variant="secondary" onClick={() => save(null)}>
-            Use built-in client
-          </Button>
-        )}
+        <RedirectUri />
       </div>
+      <ClientForm />
       {/* No confirm(): Firefox's toolbar popup can't show dialogs. */}
       <p className="text-xs text-foreground/40">Changing the client signs out every account.</p>
     </Section>

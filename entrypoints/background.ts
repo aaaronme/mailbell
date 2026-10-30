@@ -16,7 +16,7 @@ import {
   openMailInWeb,
   parseThreadUrl,
 } from '@/lib/api/gmail'
-import { getAccounts, removeAccount, setCustomClient, signIn } from '@/lib/auth/oauth'
+import { getAccounts, getCustomClient, removeAccount, setCustomClient, signIn } from '@/lib/auth/oauth'
 import type { PublicPath } from 'wxt/browser'
 import { StateManager, type EmailThread } from '@/lib/StateManager'
 import { getThreadCode } from '@/lib/otp'
@@ -44,17 +44,19 @@ function withCode(thread: EmailThread) {
   return code ? `${code} · ${thread.title}` : thread.title
 }
 
-async function sendNotification(stateManager: StateManager, feed: EmailThread) {
-  const notificationId = `mailbell-${import.meta.env.MODE}-${feed.url}`
+// Shows the toast for feed, unless its account or the settings filter it out.
+// Returns whether it did.
+async function sendNotification(stateManager: StateManager, feed: EmailThread): Promise<boolean> {
+  const notificationId = `${NOTIFICATION_PREFIX}${feed.url}`
 
   if (stateManager.notifiedEmails.has(feed.url)) {
-    return
+    return false
   }
   // Claim it before the first await: a fetch overlapping this one (the popup
   // opening mid-poll) otherwise saw it as new too and played the sound again.
   stateManager.notifiedEmails.add(feed.url)
   const sound = notificationSound(await getSettings(), feed)
-  if (sound === null) return
+  if (sound === null) return false
   await debugLog('sendNotification ->', feed.url)
 
   await browser.notifications.create(notificationId, {
@@ -63,13 +65,18 @@ async function sendNotification(stateManager: StateManager, feed: EmailThread) {
     // Leading with the code means it can be read straight off the toast.
     title: (import.meta.env.DEV ? 'DEV: ' : '') + withCode(feed),
     message: `From: ${feed.author.name} <${feed.author.email}>\n${feed.summary}`,
+    // Which inbox it landed in, when there's more than one.
+    ...(stateManager.accounts.length > 1 && { contextMessage: feed.account }),
   })
   await playNotificationSound(sound)
   setTimeout(async () => {
     console.log('auto clear notification', notificationId)
     await browser.notifications.clear(notificationId)
   }, 10 * 1000)
+  return true
 }
+
+const NOTIFICATION_PREFIX = `mailbell-${import.meta.env.MODE}-`
 
 export default defineBackground(() => {
   // A throw anywhere in start() aborts every registration after it, with
@@ -90,9 +97,11 @@ async function start() {
   // One listener for every notification; adding one per notification piled
   // them up, so each click ran every earlier one too.
   browser.notifications.onClicked.addListener(async (id) => {
-    if (!id.startsWith('mailbell-')) return
+    if (!id.startsWith(NOTIFICATION_PREFIX)) return
     await browser.notifications.clear(id)
-    await browser.action.openPopup()
+    // openPopup needs a focused window (and Chrome 127); otherwise open the
+    // mail itself, in its own account.
+    await browser.action.openPopup().catch(() => openMailInWeb(id.slice(NOTIFICATION_PREFIX.length)))
   })
   const stateManager = new StateManager({
     checkLoginStatus,
@@ -118,34 +127,32 @@ async function start() {
     await updateBadge(stateManager.getUnreadThreads().length)
   })
   // popup listener
-  let popupListenerRegistered = false
+  // The toolbar popup and the popout tab can be open at once: push to them
+  // until the last one closes. One listener however many there are, or every
+  // refresh was pushed twice.
+  let openViews = 0
   async function pushRefreshToPopup(): Promise<void> {
     await popupMessager.sendMessage('refreshPopup', undefined)
   }
   browser.runtime.onConnect.addListener(async (port) => {
     if (port.name === 'popup') {
+      if (openViews++ === 0) stateManager.on(pushRefreshToPopup)
       await debugLog('background: popup port connected')
-      // At most one registered: a new connect can land before the previous
-      // disconnect's cleanup, and two listeners pushed every refresh twice.
-      if (!popupListenerRegistered) {
-        stateManager.on(pushRefreshToPopup)
-        popupListenerRegistered = true
-      }
       port.onDisconnect.addListener(async function () {
         await debugLog('background: popup port disconnected')
+        if (--openViews > 0) return
         stateManager.off(pushRefreshToPopup)
-        popupListenerRegistered = false
         stateManager.clearViewed()
       })
     }
   })
   // notification listener
   stateManager.on(async () => {
-    const newFeeds = stateManager.getNewThreads()
-    if (newFeeds.length === 0) {
-      return
+    // One toast per poll: the newest mail that passes its account's and the
+    // settings' filters, not just the newest mail.
+    for (const feed of stateManager.getNewThreads()) {
+      if (await sendNotification(stateManager, feed)) return
     }
-    await sendNotification(stateManager, newFeeds[0]!)
   })
 
   // listen to polling event
@@ -154,20 +161,22 @@ async function start() {
       await stateManager.fetchThreads()
     }
   })
+  // Paused only while the screen is locked: someone reading or watching a
+  // video is idle but still wants new mail. Offline needs no pause -
+  // fetchThreads skips itself - and a suspended background can't hear
+  // 'online' to resume one.
   browser.idle.onStateChanged.addListener(async (state) => {
-    if (state === 'active') {
-      await ensureAlarm()
-    } else {
+    if (state === 'locked') {
       await browser.alarms.clear('fetchThreads')
+    } else if (!(await browser.alarms.get('fetchThreads'))) {
+      await createAlarm()
+      await stateManager.fetchThreads()
     }
-  })
-  globalThis.addEventListener('online', ensureAlarm)
-  globalThis.addEventListener('offline', () => {
-    browser.alarms.clear('fetchThreads')
   })
 
   // listen to message
   bgMessager.onMessage('refreshThreads', () => stateManager.refresh())
+  bgMessager.onMessage('poll', () => stateManager.fetchThreads())
   // Sign-in runs here, not in the popup: the popup closes the moment
   // Google's sign-in window takes focus, taking any pending work with it.
   bgMessager.onMessage('addAccount', async ({ data: loginHint }) => {
@@ -188,6 +197,9 @@ async function start() {
   // Refresh tokens belong to the client that issued them: switching signs
   // every account out, revoked and with its cache gone, like removing it.
   bgMessager.onMessage('setOAuthClient', async ({ data: client }) => {
+    const current = await getCustomClient()
+    const same = (a?: string | null, b?: string | null) => (a?.trim() || '') === (b?.trim() || '')
+    if (same(current?.clientId, client?.clientId) && same(current?.clientSecret, client?.clientSecret)) return
     const accounts = await getAccounts()
     await setCustomClient(client)
     for (const { email } of accounts) {
@@ -290,8 +302,4 @@ async function start() {
 // Creating an alarm under the same name replaces it, with the new period.
 async function createAlarm() {
   await browser.alarms.create('fetchThreads', { periodInMinutes: (await getSettings()).pollMinutes })
-}
-
-async function ensureAlarm() {
-  if (!(await browser.alarms.get('fetchThreads'))) await createAlarm()
 }

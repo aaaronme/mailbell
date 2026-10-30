@@ -1,9 +1,9 @@
 # Setting up a Google OAuth client
 
-Mailbell needs a Google OAuth client before it can sign in. You need your own client in either of two cases:
+Mailbell needs a Google OAuth client before it can sign in:
 
-- **As a user**: to avoid the "unverified app" warning and the 100-user cap of the built-in client. Enter the client in the popup under **Settings → Google OAuth client**.
-- **As a publisher**: to build the client into your release. Put it in `.env` as `WXT_GOOGLE_CLIENT_ID` and `WXT_GOOGLE_CLIENT_SECRET`.
+- **As a user**: the releases ship without one, so you create your own. The popup walks you through it the first time you open it; this page is the long version. You can change the client later under **Settings → Google OAuth client**.
+- **As a publisher**: to build a client into your release, put it in `.env` as `WXT_GOOGLE_CLIENT_ID` and `WXT_GOOGLE_CLIENT_SECRET`. Users can still override it.
 
 All of this is free.
 
@@ -16,7 +16,7 @@ All of this is free.
 
 Go to **Google Auth Platform** (formerly *OAuth consent screen*):
 
-1. **Branding**: set the app name, for example "Mailbell", and your email address.
+1. **Branding**: set the app name, for example "Mailbell", and your email address. Leave the app logo empty: an uploaded logo makes Google require verification.
 2. **Audience**: choose **External**, then:
    - **Personal client** (only you will sign in): leave it in *Testing* and add your own Google account(s) under **Test users**. Testing-mode refresh tokens expire after **7 days**, which means you sign in again every week.
    - **To skip the weekly sign-in**: click **Publish app** to set it to *In production*. You don't need to submit it for verification. The app stays unverified: sign-in shows a warning screen and the client is capped at 100 users. Neither matters for a personal client.

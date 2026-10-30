@@ -28,6 +28,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { GithubIcon } from '@/components/extra/GithubIcon'
 import { Avatar } from '@/components/extra/Avatar'
+import { useClient } from '@/components/extra/ClientForm'
+import { SetupGuide } from './SetupGuide'
 import { PageHeader } from '@/components/extra/PageHeader'
 import type { EmailThread } from '@/lib/StateManager'
 import { getThreadCode } from '@/lib/otp'
@@ -77,7 +79,7 @@ function MailItem({
           </div>
         </div>
         <div className="truncate text-foreground/80">{thread.title}</div>
-        <div className="truncate text-xs text-foreground/50">{thread.summary}</div>
+        <div className="truncate text-xs text-foreground/40">{thread.summary}</div>
       </div>
     </div>
   )
@@ -133,6 +135,10 @@ function CodeBar({ threads }: { threads: EmailThread[] }) {
 function Toolbar() {
   const navigate = useNavigate()
   const mailQuery = useMailQuery()
+  const clientQuery = useClient()
+  const signedIn = !!mailQuery.data?.accounts.length
+  // No client to sign in with: walk through creating one instead.
+  const needsSetup = !signedIn && clientQuery.isSuccess && !clientQuery.data
   const queryClient = useQueryClient()
   const refreshMutation = useMutation({
     // Don't rely solely on background's 'refreshPopup' push: it's lost if the
@@ -142,19 +148,23 @@ function Toolbar() {
       await bgMessager.sendMessage('refreshThreads', undefined)
       await queryClient.invalidateQueries({ queryKey: mailQueryKey })
     },
+    onError: (err) => {
+      console.error(err)
+      toast.error("Couldn't refresh. The Debug log has details.")
+    },
   })
 
-  async function markAllAsRead(msg: string) {
+  async function markAllAsRead() {
     try {
       await bgMessager.sendMessage('gmailAction', {
         cmd: 'markAllAsRead',
         urls: (mailQuery.data?.threads ?? []).map((t) => t.url),
       })
       await queryClient.invalidateQueries({ queryKey: mailQueryKey })
-      toast.success(msg)
+      toast.success('Marked all as read')
     } catch (err) {
       console.error(err)
-      toast.error(msg + ' failed')
+      toast.error("Couldn't mark all as read")
     }
   }
 
@@ -182,7 +192,7 @@ function Toolbar() {
           size="icon"
           variant="ghost"
           title={'Mark all as read'}
-          onClick={() => markAllAsRead('Mark all as read')}
+          onClick={() => markAllAsRead()}
         >
           <MailOpenIcon />
         </Button>
@@ -207,14 +217,27 @@ function Toolbar() {
           <ExternalLinkIcon />
         </Button>
       )}
-      <Button
-        size="icon"
-        variant="ghost"
-        title="New email (c)"
-        onClick={newEmail}
-      >
-        <MailPlusIcon />
-      </Button>
+      {accounts.length < 2 ? (
+        <Button size="icon" variant="ghost" title="New email (c)" onClick={() => newEmail()}>
+          <MailPlusIcon />
+        </Button>
+      ) : (
+        // Which account it's sent from.
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="icon" variant="ghost" title="New email (c)">
+              <MailPlusIcon />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align={'end'}>
+            {accounts.map((account) => (
+              <DropdownMenuItem key={account} onClick={() => newEmail(account)}>
+                From {account}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button size="icon" variant="ghost" title={'More'}>
@@ -272,7 +295,7 @@ function MailList({
   }
   // The row focused last, to refocus where it was once it's gone.
   const [selected, setSelected] = useState<{ url: string; index: number } | null>(null)
-  useShortcuts({ j: () => move(1), k: () => move(-1), ArrowDown: () => move(1), ArrowUp: () => move(-1), c: newEmail })
+  useShortcuts({ j: () => move(1), k: () => move(-1), ArrowDown: () => move(1), ArrowUp: () => move(-1), c: () => newEmail(focusedAccount()) })
   // A mail archived or deleted from the keyboard leaves the list: carry on
   // with the one that took its place.
   useEffect(() => {
@@ -284,6 +307,7 @@ function MailList({
     list.map((thread) => (
       <div
         key={thread.url}
+        data-account={thread.account}
         onFocus={(ev) => setSelected({ url: thread.url, index: mailRows().indexOf(ev.currentTarget.firstElementChild as HTMLElement) })}
       >
         <MailItem
@@ -314,7 +338,7 @@ function MailList({
               >
                 <span className="truncate">{account}</span>
                 <ExternalLinkIcon className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
-                <span className="ml-auto tabular-nums">{own.length}</span>
+                <span className="ml-auto text-foreground/40 tabular-nums">{own.length}</span>
               </button>
             </h2>
             {items(own)}
@@ -331,14 +355,14 @@ function ReauthBanner() {
   const expired = (useAccounts().data ?? []).filter((it) => it.needsReauth)
   if (!expired.length) return null
   return (
-    <div className="flex flex-col gap-1 border-b border-foreground/10 bg-destructive/10 px-4 py-2">
+    <div className="flex flex-col border-b border-foreground/10 bg-destructive/10">
       {expired.map((account) => (
-        <div key={account.email} className="flex items-center gap-2">
+        <div key={account.email} className="flex items-center gap-2 px-4 py-2">
           <span className="min-w-0 flex-1 truncate">
             <span className="font-medium">{account.email}</span>
-            <span className="text-foreground/60"> needs to sign in again</span>
+            <span className="text-destructive"> needs to sign in again</span>
           </span>
-          <Button size="sm" onClick={() => addAccount(account.email)}>
+          <Button size="sm" variant="secondary" onClick={() => addAccount(account.email)}>
             Reconnect
           </Button>
         </div>
@@ -350,6 +374,10 @@ function ReauthBanner() {
 export function IndexPage() {
   const navigate = useNavigate()
   const mailQuery = useMailQuery()
+  const clientQuery = useClient()
+  const signedIn = !!mailQuery.data?.accounts.length
+  // No client to sign in with: walk through creating one instead.
+  const needsSetup = !signedIn && clientQuery.isSuccess && !clientQuery.data
 
   async function onSelectFeed(thread: EmailThread) {
     navigate({ to: '/detail/$threadUrl', params: { threadUrl: encodeURIComponent(thread.url) } })
@@ -370,18 +398,19 @@ export function IndexPage() {
           'flex-1',
           // Centered on this element itself: a child's h-full doesn't resolve
           // against a flex item's grown height.
-          !mailQuery.data?.accounts.length && 'flex flex-col items-center justify-center gap-4',
+          !signedIn && !needsSetup && 'flex flex-col items-center justify-center gap-4 px-4 text-center',
         )}
       >
-        {mailQuery.data?.accounts.length ? (
-          <MailList
-            accounts={mailQuery.data.accounts}
-            threads={mailQuery.data.threads}
-            onSelectFeed={onSelectFeed}
-          />
+        {signedIn ? (
+          <MailList accounts={mailQuery.data!.accounts} threads={mailQuery.data!.threads} onSelectFeed={onSelectFeed} />
+        ) : needsSetup ? (
+          <SetupGuide />
         ) : (
           <>
-            <p className="font-display text-xl">Your inbox, from the toolbar</p>
+            <div className="flex flex-col gap-1">
+              <p className="font-display text-xl">Your inbox, from the toolbar</p>
+              <p className="text-xs text-foreground/60">Sign in to see new mail and one-time codes here.</p>
+            </div>
             <Button onClick={() => addAccount()}>Sign in with Google</Button>
           </>
         )}
@@ -394,4 +423,9 @@ export function IndexPage() {
 async function openInbox(account: string | undefined) {
   await openMailInWeb(account ? inboxUrl(account) : 'https://mail.google.com/mail/')
   window.close()
+}
+
+// The account of the focused mail, so c writes from the inbox you're in.
+function focusedAccount() {
+  return document.activeElement?.closest<HTMLElement>('[data-account]')?.dataset.account || undefined
 }

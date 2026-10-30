@@ -34,6 +34,10 @@ export default defineConfig({
       },
       homepage_url: 'https://github.com/aaaronme/mailbell',
     }
+    if (env.browser === 'chrome') {
+      // 30-second alarms.
+      manifest.minimum_chrome_version = '120'
+    }
     if (env.browser === 'firefox') {
       manifest.browser_specific_settings = {
         gecko: {

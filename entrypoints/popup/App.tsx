@@ -22,7 +22,8 @@ function AppContent() {
     popupMessager.onMessage('refreshPopup', () => {
       queryClient.invalidateQueries({ queryKey: mailQueryKey })
     })
-    bgMessager.sendMessage('refreshThreads', undefined)
+    // An ordinary poll: the refresh button is what re-reads every thread.
+    bgMessager.sendMessage('poll', undefined).catch((err) => console.error('poll failed', err))
     return () => {
       popupMessager.removeAllListeners()
     }

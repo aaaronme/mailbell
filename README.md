@@ -1,13 +1,13 @@
 # Mailbell for Gmail
 
-A Firefox toolbar extension that tells you when new Gmail arrives and lets you read, archive, delete or unsubscribe without opening Gmail.
+A Firefox and Chrome toolbar extension that tells you when new Gmail arrives and lets you read, archive, delete or unsubscribe without opening Gmail.
 
 Mailbell signs in with Google OAuth and talks to the official [Gmail API](https://developers.google.com/gmail/api). It never reads your Gmail cookies or scrapes the Gmail web page.
 
 ## Features
 
 - Desktop notifications for new unread mail in your inbox: for all mail, Primary only or Important only, with quiet hours, and on or off per account.
-- A notification sound per account: four built-in sounds or your own file.
+- A notification sound per account: four built-in sounds or your own file (Firefox).
 - Several Google accounts side by side.
 - Read whole threads in the popup, including HTML mail, inline images and attachments, with automatic dark mode.
 - Archive, delete, mark as read or unread, or report spam, for one thread or in bulk.
@@ -23,14 +23,16 @@ Your mail goes only between your browser and Google. Mailbell has no server, no 
 
 Mailbell asks for the `gmail.modify` scope. That scope lets it read mail, change labels (read, archive, spam, trash) and send mail; Mailbell sends only the replies you write in the popup. It cannot delete mail permanently.
 
-## Sign-in and the "unverified app" warning
+## Sign-in: your own Google client
 
-Google classes Gmail scopes as *restricted*. Until an app passes Google's verification and security assessment, Google treats it as unverified:
+Google lets an app read Gmail only through an OAuth client registered in Google Cloud, and classes the Gmail scopes as *restricted*: a client shared by many users needs Google's yearly security assessment. Mailbell therefore ships without one. Each user creates their own, which is free and takes about five minutes:
 
-- Sign-in shows a "Google hasn't verified this app" screen. Click **Advanced → Go to Mailbell (unsafe)** to continue.
-- The built-in client is limited to 100 users in total.
+1. Open the popup. With no client yet, it shows **Set up your Google client**, a step-by-step guide with the redirect URI to copy.
+2. Create the client in Google Cloud as the guide says, paste its ID and secret, and click **Save and sign in**.
 
-To avoid both, use your own Google Cloud OAuth client. Go to **Settings → Google OAuth client** in the popup and follow [docs/SETUP.md](docs/SETUP.md). It takes about five minutes, is free, and the client is used only by you.
+Sign-in then shows a "Google hasn't verified this app" screen, because your client is unverified. That's expected for a client only you use: click **Advanced → Go to (your app name)**. [docs/SETUP.md](docs/SETUP.md) has the long version and troubleshooting. You can change the client later under **Settings → Google OAuth client**.
+
+A publisher can also build a client into a release (`.env`, see [.env.example](.env.example)); users can still override it with their own.
 
 ## Development
 
@@ -41,11 +43,16 @@ pnpm dev:firefox        # or: pnpm dev (Chrome); then load the add-on, see below
 pnpm test               # vitest in headless Chromium
 pnpm compile            # type-check
 pnpm zip:firefox        # AMO upload + sources zip in .output/
+pnpm zip                # Chrome Web Store upload in .output/
 ```
 
 Needs Node 22.12 or newer, and Firefox 140 or newer. The dev command doesn't open a browser: load `.output/firefox-mv3/manifest.json` in `about:debugging` → **This Firefox** → **Load Temporary Add-on**. A temporary add-on loses its storage when it is removed.
 
-Without a `.env`, the build has no built-in client. Add a client under **Settings** before you sign in.
+In Chrome, run `pnpm build` and load `.output/chrome-mv3` from `chrome://extensions` with **Developer mode** on → **Load unpacked**.
+
+Without a `.env`, the build has no built-in client and the popup opens on the setup guide.
+
+Releasing to AMO and the Chrome Web Store: [docs/RELEASING.md](docs/RELEASING.md).
 
 UI work follows [STYLE_GUIDE.md](STYLE_GUIDE.md). `pnpm test` enforces its rules.
 

@@ -4,8 +4,10 @@ import type { OAuthClient } from './auth/oauth'
 import type { Recipients } from './reply'
 
 export const bgMessager = defineExtensionMessaging<{
-  // popup to background
+  // popup to background: the refresh button - re-reads every thread
   refreshThreads(): void
+  // popup to background: the popup opened - an ordinary poll
+  poll(): void
   // popup to background
   gmailAction(data: GmailAction): void
   // popup to background: thread url -> how it was done, null if no option

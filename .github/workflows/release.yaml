@@ -1,0 +1,32 @@
+name: Release
+
+# Push a tag like v1.0.0 (matching package.json's version) to build both
+# stores' zips and attach them to a GitHub release. Uploading to AMO and the
+# Chrome Web Store stays manual: see docs/RELEASING.md.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm compile
+      - run: pnpm test
+      - run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+      - run: pnpm zip
+      - run: pnpm zip:firefox
+      - run: gh release create "$GITHUB_REF_NAME" .output/*.zip --title "Mailbell $GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -27,6 +27,7 @@ function makeThread(url: string) {
 describe('IndexPage', () => {
   beforeEach(async () => {
     fakeBrowser.reset()
+    vi.spyOn(fakeBrowser.identity, 'getRedirectURL').mockReturnValue('https://x.extensions.allizom.org/')
   })
 
   it('lists each account in its own section, including one with nothing unread', async () => {
@@ -121,6 +122,7 @@ describe('IndexPage', () => {
     // the logged-out screen just to keep it reachable. The toolbar is
     // unconditional now, so its own "More" menu (which has Debug Log)
     // works from the logged-out screen too.
+    await browser.storage.local.set({ oauthClient: { clientId: 'cid' } })
     const screen = await render(
       <QueryClientProvider client={new QueryClient()}>
         <RouterProvider router={createAppRouter(['/'])} />
@@ -128,5 +130,23 @@ describe('IndexPage', () => {
     )
     await expect.element(screen.getByTitle('Refresh')).toBeInTheDocument()
     await expect.element(screen.getByText('Sign in with Google')).toBeInTheDocument()
+  })
+
+  it('walks through creating an OAuth client when there is none to sign in with', async () => {
+    const send = vi.spyOn(bgMessager, 'sendMessage').mockResolvedValue(undefined as never)
+    const screen = await render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={createAppRouter(['/'])} />
+      </QueryClientProvider>,
+    )
+    await expect.element(screen.getByText('Set up your Google client')).toBeVisible()
+    expect(screen.getByText('Sign in with Google').query()).toBeNull()
+    await expect.element(screen.getByLabelText('Authorized redirect URI')).toHaveValue('https://x.extensions.allizom.org/')
+
+    await screen.getByLabelText('Client ID').fill(' cid.apps.googleusercontent.com ')
+    await screen.getByLabelText('Client secret').fill('sec')
+    await screen.getByRole('button', { name: 'Save and sign in' }).click()
+    expect(send).toHaveBeenCalledWith('setOAuthClient', { clientId: ' cid.apps.googleusercontent.com ', clientSecret: 'sec' })
+    await vi.waitFor(() => expect(send).toHaveBeenCalledWith('addAccount', undefined))
   })
 })

@@ -16,10 +16,13 @@ import { useShortcuts } from '@/lib/useShortcuts'
 import { ArchiveIcon, BanIcon, ExternalLinkIcon, MailMinusIcon, MailOpenIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 
-// Every listed thread from this thread's sender, this one included.
+// Every listed thread from this thread's sender in the same account, this one
+// included: another account may still want that sender's mail.
 export function urlsFromSender(threads: EmailThread[], thread: EmailThread): string[] {
   const sender = thread.author.email.toLowerCase()
-  return threads.filter((it) => it.author.email.toLowerCase() === sender).map((it) => it.url)
+  return threads
+    .filter((it) => it.account === thread.account && it.author.email.toLowerCase() === sender)
+    .map((it) => it.url)
 }
 
 // The per-mail actions, shared by the list row and the opened mail. With
@@ -38,13 +41,13 @@ export function MailActions({
     await bgMessager.sendMessage('gmailAction', data)
     await queryClient.invalidateQueries({ queryKey: mailQueryKey })
   }
-  async function run(msg: string, data: GmailAction) {
+  async function run(done: string, failed: string, data: GmailAction) {
     try {
       await gmailAction(data)
-      toast.success(msg)
+      toast.success(done)
     } catch (err) {
       console.error(err)
-      toast.error(msg + ' failed')
+      toast.error(failed)
     }
   }
   // Removes what the user asked for, whatever kind of unsubscribe it was:
@@ -68,16 +71,17 @@ export function MailActions({
         open: 'Unsubscribe page opened',
         mail: 'Unsubscribe mail ready to send',
       }[kind],
+      "Couldn't remove the mail",
       cleanup,
     )
   }
   const one = (cmd: 'archive' | 'deleteMail' | 'markAsRead' | 'markAsSpam') => ({ cmd, url: thread.url })
   useShortcuts(
     {
-      e: () => run('Archive', one('archive')),
-      '#': () => run('Delete', one('deleteMail')),
-      I: () => run('Mark as read', one('markAsRead')),
-      '!': () => run('Mark as spam', one('markAsSpam')),
+      e: () => run('Archived', "Couldn't archive", one('archive')),
+      '#': () => run('Deleted', "Couldn't delete", one('deleteMail')),
+      I: () => run('Marked as read', "Couldn't mark as read", one('markAsRead')),
+      '!': () => run('Marked as spam', "Couldn't mark as spam", one('markAsSpam')),
     },
     shortcuts,
   )
@@ -90,15 +94,15 @@ export function MailActions({
         size="icon"
         variant="ghost"
         title="Archive (e)"
-        onClick={() => run('Archive', one('archive'))}
+        onClick={() => run('Archived', "Couldn't archive", one('archive'))}
       >
         <ArchiveIcon />
       </Button>
       <Button
         size="icon"
         variant="ghost"
-        title="Trash (#)"
-        onClick={() => run('Delete', one('deleteMail'))}
+        title="Delete (#)"
+        onClick={() => run('Deleted', "Couldn't delete", one('deleteMail'))}
       >
         <Trash2Icon />
       </Button>
@@ -106,14 +110,14 @@ export function MailActions({
         size="icon"
         variant="ghost"
         title="Mark as read (Shift+I)"
-        onClick={() => run('Mark as read', one('markAsRead'))}
+        onClick={() => run('Marked as read', "Couldn't mark as read", one('markAsRead'))}
       >
         <MailOpenIcon />
       </Button>
       {(canUnsubscribe || othersFromSender) && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="icon" variant="ghost" title={canUnsubscribe ? 'Unsubscribe' : 'From this sender'}>
+            <Button size="icon" variant="ghost" title={canUnsubscribe ? 'Unsubscribe' : 'More from this sender'}>
               <MailMinusIcon />
             </Button>
           </DropdownMenuTrigger>
@@ -137,10 +141,10 @@ export function MailActions({
             )}
             {othersFromSender && (
               <>
-                <DropdownMenuItem onClick={() => run(`Archive ${senderUrls.length} mails`, all('archiveAll'))}>
+                <DropdownMenuItem onClick={() => run(`Archived ${senderUrls.length} emails`, "Couldn't archive them all", all('archiveAll'))}>
                   Archive all {senderUrls.length} from sender
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => run(`Delete ${senderUrls.length} mails`, all('deleteAll'))}>
+                <DropdownMenuItem onClick={() => run(`Deleted ${senderUrls.length} emails`, "Couldn't delete them all", all('deleteAll'))}>
                   Delete all {senderUrls.length} from sender
                 </DropdownMenuItem>
               </>
@@ -152,7 +156,7 @@ export function MailActions({
         size="icon"
         variant="ghost"
         title="Spam (!)"
-        onClick={() => run('Mark as spam', one('markAsSpam'))}
+        onClick={() => run('Marked as spam', "Couldn't mark as spam", one('markAsSpam'))}
       >
         <BanIcon />
       </Button>

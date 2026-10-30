@@ -663,14 +663,15 @@ export async function openMailInWeb(url: string) {
   await browser.tabs.create({ url })
 }
 
-// The first account's inbox - the one the user added first.
+// The first signed-in account's inbox - the one the user added first.
 export async function getActiveInboxUrl() {
-  const [account] = await getAccounts()
+  const account = (await getAccounts()).find((it) => !it.needsReauth)
   return account ? inboxUrl(account.email) : 'https://mail.google.com/mail/'
 }
 
-export async function newEmail() {
-  const [account] = await getAccounts()
+// A compose window from `from`, else the first signed-in account.
+export async function newEmail(from?: string) {
+  const account = from ? { email: from } : (await getAccounts()).find((it) => !it.needsReauth)
   const currentWindow = await browser.windows.getCurrent()
   const windowWidth = 800
   const windowHeight = 600
