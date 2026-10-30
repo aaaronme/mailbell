@@ -89,6 +89,6 @@ describe('IndexPage', () => {
       </QueryClientProvider>,
     )
     await expect.element(screen.getByTitle('Refresh')).toBeInTheDocument()
-    await expect.element(screen.getByText('Please login to Gmail')).toBeInTheDocument()
+    await expect.element(screen.getByText('Sign in with Google')).toBeInTheDocument()
   })
 })

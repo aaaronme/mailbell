@@ -1,536 +1,265 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { fakeBrowser } from '@webext-core/fake-browser'
 import {
-  extractThreadMail,
-  markAsRead,
-  parseSyncSession,
-  extractRSS,
-  formatDate,
-  getOpenWebLink,
-  getGmailAt,
-  getAllRSS,
-  detectActiveSlot,
-  parseAccountSlot,
-  parseAddressField,
-  extractGmailInfo,
-  parseReplyTo,
   CURRENT_EXTRACT_VERSION,
-  type Feed,
-  type ThreadMail,
+  composeUrl,
+  decodeBase64Url,
+  getAllRSS,
+  getRawMessage,
+  getThreadMail,
+  markAsSpam,
+  messageToMail,
+  parseAddressField,
+  parseMailbox,
+  parseThreadUrl,
+  threadToFeed,
+  threadToMail,
+  threadUrl,
+  type GmailMessage,
+  type GmailPart,
+  type GmailThread,
 } from './gmail'
-import { parseDocument, parseFeed } from 'htmlparser2'
-import { selectOne } from 'css-select'
 
-describe('extractRSS', () => {
-  it('empty', () => {
-    const str = `<?xml version="1.0" encoding="UTF-8"?><feed version="0.3" xmlns="http://purl.org/atom/ns#"><title>Gmail - Inbox for rxliuli@gmail.com</title><tagline>New messages in your Gmail Inbox</tagline><fullcount>0</fullcount><link rel="alternate" href="https://mail.google.com/mail/u/0" type="text/html"/><modified>2025-06-03T09:23:46Z</modified></feed>`
-    const rss = extractRSS(str)
-    expect(rss).toEqual({
-      email: 'rxliuli@gmail.com',
-      modified: '2025-06-03T09:23:46Z',
-      feeds: [],
-    })
-  })
-  const author = {
-    name: '璃 琉',
-    email: 'rxliuli@outlook.com',
+vi.stubGlobal('browser', fakeBrowser)
+
+const b64 = (text: string) =>
+  btoa(String.fromCharCode(...new TextEncoder().encode(text)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+
+function part(mimeType: string, text: string, headers: Record<string, string> = {}): GmailPart {
+  return {
+    mimeType,
+    headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
+    body: { size: text.length, data: b64(text) },
   }
-  it('plain text', () => {
-    const str = `<?xml version="1.0" encoding="UTF-8"?><feed version="0.3" xmlns="http://purl.org/atom/ns#"><title>Gmail - Inbox for rxliuli@gmail.com</title><tagline>New messages in your Gmail Inbox</tagline><fullcount>1</fullcount><link rel="alternate" href="https://mail.google.com/mail/u/1" type="text/html"/><modified>2025-06-03T09:41:12Z</modified><entry><title>Test Text</title><summary>Test PlainText</summary><link rel="alternate" href="https://mail.google.com/mail/u/1?account_id=rxliuli@gmail.com&amp;message_id=19734500f9fb78da&amp;view=conv&amp;extsrc=atom" type="text/html"/><modified>2025-06-03T05:42:31Z</modified><issued>2025-06-03T05:42:31Z</issued><id>tag:gmail.google.com,2004:1833885343766247642</id><author><name>璃 琉</name><email>rxliuli@outlook.com</email></author></entry></feed>`
-    const feeds = extractRSS(str).feeds
-    expect(feeds).toEqual([
-      {
-        title: 'Test Text',
-        summary: 'Test PlainText',
-        url: 'https://mail.google.com/mail/u/1?account_id=rxliuli@gmail.com&message_id=19734500f9fb78da&view=conv&extsrc=atom',
-        modified: '2025-06-03T05:42:31Z',
-        author,
-      } satisfies Feed,
-    ])
-  })
-  it('html', () => {
-    const str = `<?xml version="1.0" encoding="UTF-8"?><feed version="0.3" xmlns="http://purl.org/atom/ns#"><title>Gmail - Inbox for rxliuli@gmail.com</title><tagline>New messages in your Gmail Inbox</tagline><fullcount>1</fullcount><link rel="alternate" href="https://mail.google.com/mail/u/0" type="text/html"/><modified>2025-06-03T09:49:33Z</modified><entry><title>Test HTML</title><summary>Hello World</summary><link rel="alternate" href="https://mail.google.com/mail/u/0?account_id=rxliuli@gmail.com&amp;message_id=1973531a7027620c&amp;view=conv&amp;extsrc=atom" type="text/html"/><modified>2025-06-03T09:48:55Z</modified><issued>2025-06-03T09:48:55Z</issued><id>tag:gmail.google.com,2004:1833900846285808140</id><author><name>璃 琉</name><email>rxliuli@outlook.com</email></author></entry></feed>`
-    const feeds = extractRSS(str).feeds
-    expect(feeds).toEqual([
-      {
-        title: 'Test HTML',
-        summary: 'Hello World',
-        url: 'https://mail.google.com/mail/u/0?account_id=rxliuli@gmail.com&message_id=1973531a7027620c&view=conv&extsrc=atom',
-        modified: '2025-06-03T09:48:55Z',
-        author,
-      },
-    ])
-  })
-  it('image', () => {
-    const str = `<?xml version="1.0" encoding="UTF-8"?><feed version="0.3" xmlns="http://purl.org/atom/ns#"><title>Gmail - Inbox for rxliuli@gmail.com</title><tagline>New messages in your Gmail Inbox</tagline><fullcount>1</fullcount><link rel="alternate" href="https://mail.google.com/mail/u/0" type="text/html"/><modified>2025-06-03T10:03:58Z</modified><entry><title>Test Image</title><summary></summary><link rel="alternate" href="https://mail.google.com/mail/u/0?account_id=rxliuli@gmail.com&amp;message_id=19734a32806f59c1&amp;view=conv&amp;extsrc=atom" type="text/html"/><modified>2025-06-03T07:13:17Z</modified><issued>2025-06-03T07:13:17Z</issued><id>tag:gmail.google.com,2004:1833891054033525185</id><author><name>璃 琉</name><email>rxliuli@outlook.com</email></author></entry></feed>`
-    const feeds = extractRSS(str).feeds
-    expect(feeds).toEqual([
-      {
-        title: 'Test Image',
-        summary: '',
-        url: 'https://mail.google.com/mail/u/0?account_id=rxliuli@gmail.com&message_id=19734a32806f59c1&view=conv&extsrc=atom',
-        modified: '2025-06-03T07:13:17Z',
-        author,
-      } satisfies Feed,
-    ])
-  })
-  it.todo('attachment')
-})
+}
 
-describe('extractContent', () => {
-  it('plain text', async () => {
-    const content = (await import('./assets/content-plaintext.html?raw')).default
-    const mail = extractThreadMail(content)
-    expect(mail.extractVersion).eq(CURRENT_EXTRACT_VERSION)
-    expect(mail.subject).eq('Test Text')
-    expect(mail.messages[0]!.senderName).eq('璃 琉')
-    expect(mail.messages[0]!.senderEmail).eq('rxliuli@outlook.com')
-    expect(mail.messages[0]!.time).eq('2025-06-03T05:42:00.000Z')
-    expect(mail.messages[0]!.to).toEqual(['rxliuli@gmail.com'])
-    expect(mail.messages[0]!.cc).toEqual([])
-    expect(mail.messages[0]!.replyTo).undefined
-    expect(mail.messages[0]!.contentHtml).includes('Test PlainText')
-  })
-  it('html', async () => {
-    const content = (await import('./assets/content-html.html?raw')).default
-    const mail = extractThreadMail(content)
-    expect(mail.subject).eq('Test HTML')
-    expect(mail.messages[0]!.contentHtml).includes('<i>Hello</i>').includes('<b>World</b>')
-  })
-  it('extracts <style> tags from the document', async () => {
-    const content = (await import('./assets/content-html.html?raw')).default
-    const mail = extractThreadMail(content)
-    expect(mail.styles).length(2)
-    expect(mail.styles[0]).includes('font-family: arial, sans-serif')
-    expect(mail.styles[1]).includes('.logo')
-  })
-  it('image', async () => {
-    const content = (await import('./assets/content-image.html?raw')).default
-    const main = extractThreadMail(content, 'https://mail.google.com/mail/u/0')
-    const html = main.messages[0]!.contentHtml
-    expect(html).includes('<img')
-    const doc = new DOMParser().parseFromString(html, 'text/html')
-    const img = doc.querySelector('img') as HTMLImageElement
-    expect(img.src).include('https://mail.google.com/mail/u/0')
-  })
-  it.todo('attachment')
-  it('marks background images so the dark-mode filter can render those blocks whole', async () => {
-    // A background image is painted by the element itself, so the shadow CSS can
-    // only compensate it by filtering that element - and its subtree - as a
-    // whole. extractThreadMail adds no more than the marker: light mode is
-    // unaffected, the legacy attribute and the inline declarations stay exactly
-    // as they were in the source. See lib/emailBackground.ts.
-    const content = (await import('./assets/content-background.html?raw')).default
-    const mail = extractThreadMail(content)
-    const doc = new DOMParser().parseFromString(mail.messages[0]!.contentHtml, 'text/html')
+function message(id: string, opts: { from?: string; subject?: string; date?: number; parts: GmailPart[]; labels?: string[] }): GmailMessage {
+  return {
+    id,
+    threadId: 't1',
+    labelIds: opts.labels ?? ['INBOX', 'UNREAD'],
+    snippet: 'Hi &amp; welcome',
+    internalDate: String(opts.date ?? Date.UTC(2026, 9, 30, 8, 0)),
+    payload: {
+      mimeType: 'multipart/alternative',
+      headers: [
+        { name: 'From', value: opts.from ?? '"Ann Example" <ann@example.com>' },
+        { name: 'To', value: 'me@gmail.com, "Bob" <bob@example.com>' },
+        { name: 'Subject', value: opts.subject ?? 'Hello' },
+      ],
+      parts: opts.parts,
+    },
+  }
+}
 
-    const cover = doc.querySelector('td[background]') as HTMLElement
-    expect(cover.getAttribute('data-email-bg')).toBe('')
-    expect(cover.getAttribute('background')).toContain('i.pinimg.com/400x300')
-    expect(cover.getAttribute('style')).toBe(
-      'border-radius:16px 0 0 16px;background-size:cover;background-position:center;background-repeat:no-repeat',
+const HTML = '<html><head><style>.x{color:red}</style></head><body><p class="x">Hi <b>there</b></p><script>alert(1)</script></body></html>'
+
+describe('thread urls', () => {
+  it('round-trips account and thread id', () => {
+    const url = threadUrl('me+tag@gmail.com', '18c0ffee')
+    expect(url).toBe('https://mail.google.com/mail/?authuser=me%2Btag%40gmail.com#inbox/18c0ffee')
+    expect(parseThreadUrl(url)).toEqual({ account: 'me+tag@gmail.com', threadId: '18c0ffee' })
+  })
+  it('rejects anything else', () => {
+    expect(parseThreadUrl('https://mail.google.com/mail/u/0/#inbox')).toBeNull()
+    expect(parseThreadUrl('not a url')).toBeNull()
+  })
+  it('composes from the given account', () => {
+    expect(composeUrl('me@gmail.com', { to: 'a@b.c' })).toBe(
+      'https://mail.google.com/mail/?authuser=me%40gmail.com&view=cm&fs=1&to=a%40b.c',
     )
-
-    const banner = doc.querySelector('div[style*="background: #111111"]') as HTMLElement
-    expect(banner.getAttribute('data-email-bg')).toBe('')
-    expect(banner.getAttribute('style')).toBe(
-      'background: #111111 url("https://i.pinimg.com/banner.jpg") no-repeat center/cover; color: #ffffff; padding: 8px',
-    )
-
-    const hero = doc.querySelector('div[style^="background-image:url"]') as HTMLElement
-    expect(hero.getAttribute('data-email-bg')).toBe('')
-    expect(hero.getAttribute('style')).toBe(
-      'background-image:url(https://i.pinimg.com/hero.jpg); background-size: contain; background-repeat: no-repeat',
-    )
-
-    // The real <img> tiles next to them are untouched: they are already
-    // compensated by the `img, video` rule.
-    expect(doc.querySelector('img')!.hasAttribute('data-email-bg')).toBe(false)
-
-    // Exactly the three image-painted elements, and nothing copy-dependent: a
-    // picture-only collage tile is marked the same way a bank board is.
-    expect(doc.querySelectorAll('[data-email-bg]')).toHaveLength(3)
-  })
-
-  it('reply', async () => {
-    const content = (await import('./assets/content-reply.html?raw')).default
-    const mail = extractThreadMail(content, 'https://mail.google.com/mail/u/0')
-    expect(mail.messages).length(mail.messageCount)
   })
 })
 
-describe('tools', () => {
-  it('formatDate', () => {
-    expect(formatDate('Tue, Jun 3, 2025 at 10:12 AM')).eq('2025-06-03T02:12:00.000Z')
+describe('MIME decoding', () => {
+  it('decodes base64url as UTF-8 by default', () => {
+    expect(decodeBase64Url(b64('Grüße ✓'))).toBe('Grüße ✓')
   })
-
-  it.each([
-    'Tue, Jun 3, 2025, 10:12 AM',
-    // newer ICU puts a narrow no-break space before AM/PM
-    'Tue, Jun 3, 2025 at 10:12\u202fAM',
-    'Tue, Jun 3, 2025 at 10:12',
-    'Tue, 3 Jun 2025 at 10:12',
-    'Tue, 3 Jun 2025, 10:12 AM',
-    // seen live on Firefox (en-GB): full month name
-    '3 June 2025 at 10:12',
-    'June 3, 2025 at 10:12 AM',
-  ])('formatDate understands %s', (date) => {
-    expect(formatDate(date)).eq(formatDate('Tue, Jun 3, 2025 at 10:12 AM'))
+  it('honours a declared charset', () => {
+    // "é" in ISO-8859-1
+    expect(decodeBase64Url(btoa('\xe9'), 'iso-8859-1')).toBe('é')
   })
-
-  it('formatDate gives up quietly instead of throwing on an unknown format', () => {
-    // A throw here used to abort the whole poll, so no account showed any mail.
-    expect(formatDate('Di., 3. Juni 2025 um 10:12')).eq('')
+  it('parses mailboxes', () => {
+    expect(parseMailbox('"Ann Example" <ann@example.com>')).toEqual({ name: 'Ann Example', email: 'ann@example.com' })
+    expect(parseMailbox('ann@example.com')).toEqual({ name: 'ann@example.com', email: 'ann@example.com' })
   })
-})
-
-describe('getOpenWebLink', () => {
-  it('normal', () => {
-    expect(
-      getOpenWebLink(
-        'https://mail.google.com/mail/u/0?account_id=rxliuli@gmail.com&message_id=19734500f9fb78da&view=conv&extsrc=atom',
-      ),
-    ).eq('https://mail.google.com/mail/u/0/#inbox/19734500f9fb78da')
-  })
-})
-
-describe('parseAddressField', () => {
-  it('parses a single "name" <email> pair', () => {
-    expect(parseAddressField('&quot;Liuli RX&quot;&lt;rxliuli@gmail.com&gt;')).toEqual([
-      'Liuli RX <rxliuli@gmail.com>',
+  it('parses address lists', () => {
+    expect(parseAddressField('"A" <a@x.com>, "B" <b@y.com>')).toEqual(['A <a@x.com>', 'B <b@y.com>'])
+    expect(parseAddressField('a@x.com, "Doe, Jane" <j@x.com>, "j@x.com" <j@x.com>')).toEqual([
+      'a@x.com',
+      'Doe, Jane <j@x.com>',
+      'j@x.com',
     ])
-  })
-  it('parses multiple comma-separated addresses', () => {
-    expect(
-      parseAddressField('&quot;A&quot;&lt;a@x.com&gt;, &quot;B&quot;&lt;b@y.com&gt;'),
-    ).toEqual(['A <a@x.com>', 'B <b@y.com>'])
-  })
-  it('parses a bare address with no display name', () => {
-    expect(parseAddressField('&lt;a@x.com&gt;')).toEqual(['a@x.com'])
-  })
-  it('collapses a display name that is just the email address', () => {
-    expect(parseAddressField('&quot;a@x.com&quot;&lt;a@x.com&gt;')).toEqual(['a@x.com'])
-  })
-  it('falls back to a bare regex match when there are no angle brackets', () => {
-    expect(parseAddressField('a@x.com')).toEqual(['a@x.com'])
-  })
-  it('returns an empty array for empty input', () => {
     expect(parseAddressField('')).toEqual([])
   })
 })
 
-describe('extractGmailInfo', () => {
-  it('parses the u/<n> form with a message_id', () => {
-    expect(
-      extractGmailInfo(
-        'https://mail.google.com/mail/u/0?account_id=rxliuli@gmail.com&message_id=19734500f9fb78da&view=conv',
-      ),
-    ).toEqual({ n: '0', thread: '19734500f9fb78da' })
-  })
-  it('parses the compatible u=<n> form', () => {
-    expect(extractGmailInfo('https://mail.google.com/mail/u=1/?message_id=abc123')).toEqual({
-      n: '1',
-      thread: 'abc123',
-    })
-  })
-  it('returns null when there is no message_id', () => {
-    expect(extractGmailInfo('https://mail.google.com/mail/u/0?view=conv')).toBeNull()
-  })
-})
-
-describe('parseReplyTo', () => {
-  const thread: ThreadMail = {
-    subject: 'Test',
-    messageCount: 2,
-    styles: [],
-    extractVersion: CURRENT_EXTRACT_VERSION,
-    messages: [
-      {
-        senderName: 'Me',
-        senderEmail: 'me@gmail.com',
-        time: '2025-06-03T05:42:00.000Z',
-        to: ['them@example.com'],
-        cc: [],
-        contentHtml: '',
-      },
-      {
-        senderName: 'Them',
-        senderEmail: 'them@example.com',
-        time: '2025-06-03T06:00:00.000Z',
-        to: ['me@gmail.com'],
-        cc: [],
-        contentHtml: '',
-      },
-    ],
-  }
-  it('returns the other participant when the thread has one', () => {
-    expect(parseReplyTo(thread, 'me@gmail.com')).toEqual({ email: 'them@example.com', name: 'Them' })
-  })
-  it('returns undefined when every message is from "me"', () => {
-    const selfOnly: ThreadMail = { ...thread, messages: [thread.messages[0]!] }
-    expect(parseReplyTo(selfOnly, 'me@gmail.com')).toBeUndefined()
-  })
-})
-
-describe('getGmailAt', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
+describe('messageToMail', () => {
+  it('prefers the HTML part, lifting out styles and scripts', () => {
+    const { message: mail, styles } = messageToMail(
+      message('m1', { parts: [part('text/plain', 'Hi there'), part('text/html', HTML)] }),
+    )
+    expect(styles).toEqual(['.x{color:red}'])
+    expect(mail.contentHtml).toBe('<p class="x">Hi <b>there</b></p>')
+    expect(mail.contentText).toBe('Hi there')
+    expect(mail.senderName).toBe('Ann Example')
+    expect(mail.senderEmail).toBe('ann@example.com')
+    expect(mail.to).toEqual(['me@gmail.com', 'Bob <bob@example.com>'])
+    expect(mail.time).toBe('2026-10-30T08:00:00.000Z')
   })
 
-  it('returns the cookie value when the default store lookup finds it (Chrome/Firefox)', async () => {
-    const get = vi.fn().mockResolvedValue({ value: 'at-token' })
-    const getAllCookieStores = vi.fn()
-    vi.stubGlobal('browser', { cookies: { get, getAllCookieStores } })
-
-    expect(await getGmailAt('0')).eq('at-token')
-    expect(getAllCookieStores).not.toBeCalled()
+  it('escapes a plain-text-only message into a <pre>', () => {
+    const { message: mail } = messageToMail(message('m1', { parts: [part('text/plain', 'a <b> & c')] }))
+    expect(mail.contentHtml).toContain('a &lt;b&gt; &amp; c')
+    expect(mail.contentHtml).toMatch(/^<pre/)
   })
 
-  it('falls back to searching every cookie store when the default lookup is empty (Safari)', async () => {
-    const get = vi
-      .fn()
-      .mockResolvedValueOnce(undefined) // default (no storeId) lookup
-      .mockResolvedValueOnce(undefined) // first store
-      .mockResolvedValueOnce({ value: 'at-token' }) // second store
-    const getAllCookieStores = vi.fn().mockResolvedValue([{ id: 'store-1' }, { id: 'store-2' }])
-    vi.stubGlobal('browser', { cookies: { get, getAllCookieStores } })
-
-    expect(await getGmailAt('0')).eq('at-token')
-    expect(get).toHaveBeenNthCalledWith(2, expect.objectContaining({ storeId: 'store-1' }))
-    expect(get).toHaveBeenNthCalledWith(3, expect.objectContaining({ storeId: 'store-2' }))
-  })
-
-  it('returns undefined when the cookie exists in no store', async () => {
-    const get = vi.fn().mockResolvedValue(undefined)
-    const getAllCookieStores = vi.fn().mockResolvedValue([{ id: 'store-1' }])
-    vi.stubGlobal('browser', { cookies: { get, getAllCookieStores } })
-
-    expect(await getGmailAt('0')).toBeUndefined()
-  })
-})
-
-describe('parseAccountSlot', () => {
-  it('extracts the slot from mail and sync URLs alike', () => {
-    expect(parseAccountSlot('https://mail.google.com/mail/u/0/feed/atom')).eq('0')
-    expect(parseAccountSlot('https://mail.google.com/mail/u/12/?fs=1')).eq('12')
-    expect(parseAccountSlot('https://mail.google.com/sync/u/1/i/s?hl=en')).eq('1')
-    expect(parseAccountSlot('https://mail.google.com/mail/u/3')).eq('3')
-    expect(parseAccountSlot('https://mail.google.com/mail/u/1#inbox')).eq('1')
-  })
-  it('returns null when no slot is present (e.g. redirected to the login page)', () => {
-    expect(parseAccountSlot('https://accounts.google.com/ServiceLogin?service=mail')).toBeNull()
-    expect(parseAccountSlot('https://mail.google.com/mail/')).toBeNull()
-  })
-})
-
-describe('multi-account slot resolution', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  function feedXml(email: string, entries: { messageId: string; entrySlot?: string }[]) {
-    const entryXml = entries
-      .map(
-        ({ messageId, entrySlot = '0' }) =>
-          `<entry><title>t</title><summary>s</summary><link rel="alternate" href="https://mail.google.com/mail/u/${entrySlot}?account_id=${email}&amp;message_id=${messageId}&amp;view=conv&amp;extsrc=atom" type="text/html"/><modified>2025-06-03T05:42:31Z</modified><issued>2025-06-03T05:42:31Z</issued><id>tag:gmail.google.com,2004:1</id><author><name>n</name><email>a@b.com</email></author></entry>`,
-      )
-      .join('')
-    return `<?xml version="1.0" encoding="UTF-8"?><feed version="0.3" xmlns="http://purl.org/atom/ns#"><title>Gmail - Inbox for ${email}</title><tagline>New messages</tagline><fullcount>${entries.length}</fullcount><link rel="alternate" href="https://mail.google.com/mail/u/0" type="text/html"/><modified>2025-06-03T09:23:46Z</modified>${entryXml}</feed>`
-  }
-
-  function stubBrowser(options: {
-    activeSlot?: string
-    accountCount?: number
-    tabs?: { url: string; active?: boolean; lastAccessed?: number }[]
-  }) {
-    const data: Record<string, unknown> = {}
-    if (options.activeSlot !== undefined) data['activeSlot'] = options.activeSlot
-    if (options.accountCount !== undefined) data['accountCount'] = options.accountCount
-    vi.stubGlobal('browser', {
-      storage: {
-        local: {
-          get: vi.fn(async (key: string | string[]) => {
-            const keys = Array.isArray(key) ? key : [key]
-            return Object.fromEntries(keys.map((k) => [k, data[k]]))
-          }),
-          set: vi.fn(async (obj: Record<string, unknown>) => {
-            Object.assign(data, obj)
-          }),
+  it('lists attachments but not inline images', () => {
+    const msg = message('m1', {
+      parts: [
+        part('text/html', '<body><img src="cid:logo@x"></body>'),
+        { mimeType: 'application/pdf', filename: 'a.pdf', body: { size: 10, attachmentId: 'att1' } },
+        {
+          mimeType: 'image/png',
+          filename: 'logo.png',
+          headers: [{ name: 'Content-ID', value: '<logo@x>' }],
+          body: { size: 4, attachmentId: 'att2' },
         },
-      },
-      tabs: {
-        query: vi.fn(async () => options.tabs ?? []),
-      },
-    })
-    return data
-  }
-
-  function feedResponse(requestedSlot: string, servedSlot: string | null, body: string) {
-    return {
-      ok: true,
-      status: 200,
-      redirected: requestedSlot !== servedSlot,
-      url:
-        servedSlot === null
-          ? 'https://accounts.google.com/ServiceLogin?service=mail'
-          : `https://mail.google.com/mail/u/${servedSlot}/feed/atom`,
-      headers: new Headers(),
-      text: async () => body,
-    }
-  }
-
-  // Two accounts signed in: u/0 and u/1 serve their own feeds, anything
-  // higher 302s to u/0 (confirmed live - resp.url is the only tell).
-  function twoAccountFetch() {
-    return vi.fn(async (url: string) => {
-      const slot = parseAccountSlot(url)!
-      if (slot === '0') return feedResponse('0', '0', feedXml('a@gmail.com', [{ messageId: 'a1' }]))
-      if (slot === '1') return feedResponse('1', '1', feedXml('b@gmail.com', [{ messageId: 'b1', entrySlot: '0' }]))
-      return feedResponse(slot, '0', feedXml('a@gmail.com', []))
-    })
-  }
-
-  it('fetches every signed-in account and rewrites entry urls onto their slot', async () => {
-    // Confirmed live: the feed's entry links hardcode /u/0 no matter which
-    // slot served the feed - without the rewrite, actions on a non-default
-    // account would target account 0.
-    stubBrowser({ accountCount: 2 })
-    vi.stubGlobal('fetch', twoAccountFetch())
-
-    const accounts = await getAllRSS()
-    expect(accounts.map((it) => it.email)).toEqual(['a@gmail.com', 'b@gmail.com'])
-    expect(accounts[1]!.feeds[0]!.url).toContain('/u/1?account_id=')
-  })
-
-  it('discovers a newly signed-in account one slot at a time', async () => {
-    const data = stubBrowser({})
-    const fetchMock = twoAccountFetch()
-    vi.stubGlobal('fetch', fetchMock)
-
-    // Nothing remembered yet: probes u/0 and u/1, both answer.
-    expect((await getAllRSS()).map((it) => it.email)).toEqual(['a@gmail.com', 'b@gmail.com'])
-    expect(fetchMock).toBeCalledTimes(2)
-    expect(data['accountCount']).eq(2)
-
-    // Next poll probes one past the known count (u/2), which misses.
-    expect(await getAllRSS()).toHaveLength(2)
-    expect(fetchMock).toBeCalledTimes(5)
-  })
-
-  it('forgets an account that signed out', async () => {
-    const data = stubBrowser({ accountCount: 2 })
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => {
-        const slot = parseAccountSlot(url)!
-        return feedResponse(slot, '0', feedXml('a@gmail.com', []))
-      }),
-    )
-
-    expect((await getAllRSS()).map((it) => it.email)).toEqual(['a@gmail.com'])
-    expect(data['accountCount']).eq(1)
-  })
-
-  it("fails the poll on an HTTP error instead of treating that account as signed out", async () => {
-    const data = stubBrowser({ accountCount: 2 })
-    const fetchMock = twoAccountFetch()
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) =>
-        parseAccountSlot(url) === '1' ? { ...(await fetchMock(url)), ok: false, status: 503 } : fetchMock(url),
-      ),
-    )
-
-    await expect(getAllRSS()).rejects.toThrow('503')
-    expect(data['accountCount']).eq(2)
-  })
-
-  it('throws when no account is signed in', async () => {
-    stubBrowser({})
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) => feedResponse(parseAccountSlot(url)!, null, '')),
-    )
-    await expect(getAllRSS()).rejects.toThrow('no signed-in Gmail account')
-  })
-
-  it('prefers the most recently active Gmail tab over the stored slot', async () => {
-    stubBrowser({
-      activeSlot: '0',
-      tabs: [
-        { url: 'https://mail.google.com/mail/u/0/#inbox', active: false, lastAccessed: 100 },
-        { url: 'https://mail.google.com/mail/u/1/#inbox', active: true, lastAccessed: 200 },
       ],
     })
-    expect(await detectActiveSlot()).eq('1')
-  })
-
-  it('uses the stored slot when no Gmail tab is open', async () => {
-    stubBrowser({ activeSlot: '3', tabs: [] })
-    expect(await detectActiveSlot()).eq('3')
-  })
-
-  it('defaults to slot 0 with no signal at all', async () => {
-    stubBrowser({})
-    expect(await detectActiveSlot()).eq('0')
+    const { message: mail } = messageToMail(msg, new Map([['logo@x', 'data:image/png;base64,AAAA']]))
+    expect(mail.attachments).toEqual([
+      { fileName: 'a.pdf', mimeType: 'application/pdf', size: 10, messageId: 'm1', attachmentId: 'att1' },
+    ])
+    expect(mail.contentHtml).toContain('src="data:image/png;base64,AAAA"')
   })
 })
 
-describe('gmail actions', () => {
-  const THREAD_URL = 'https://mail.google.com/mail/u/7/?account_id=me@example.com&message_id=1a186254593d96af&view=conv'
-  // The bits of the real page the sync session is read from.
-  const page = (token: string) =>
-    `<script>var GM_ID_KEY = 'af1be7b5ba';var GLOBALS=[null,null,1008422238,"x"];` +
-    `_setData(["sdpc","${token}"]);BOOTSTRAP=[null,"gmail.pinto-server_20261026.16_p2"]</script>`
+describe('threadToFeed / threadToMail', () => {
+  const thread: GmailThread = {
+    id: 't1',
+    historyId: '100',
+    messages: [
+      message('m1', { subject: 'Plans', date: Date.UTC(2026, 9, 29), parts: [part('text/plain', 'one')] }),
+      message('m2', {
+        from: 'Bob <bob@example.com>',
+        subject: 'Re: Plans',
+        date: Date.UTC(2026, 9, 30),
+        parts: [part('text/plain', 'two')],
+      }),
+      message('d1', { date: Date.UTC(2026, 9, 31), parts: [part('text/plain', 'draft')], labels: ['DRAFT'] }),
+    ],
+  }
+
+  it('takes the subject from the first message and the rest from the last, skipping drafts', () => {
+    expect(threadToFeed('me@gmail.com', thread)).toEqual({
+      title: 'Plans',
+      summary: 'Hi & welcome',
+      url: threadUrl('me@gmail.com', 't1'),
+      modified: '2026-10-30T00:00:00.000Z',
+      author: { name: 'Bob', email: 'bob@example.com' },
+    })
+    const mail = threadToMail(thread)
+    expect(mail.messageCount).toBe(2)
+    expect(mail.extractVersion).toBe(CURRENT_EXTRACT_VERSION)
+  })
+})
+
+describe('Gmail API calls', () => {
+  const ACCOUNT = 'me@gmail.com'
+  const thread: GmailThread = {
+    id: 't1',
+    historyId: '100',
+    messages: [message('m1', { parts: [part('text/plain', 'one')] })],
+  }
+  let fetchMock: ReturnType<typeof vi.fn>
+  let mailboxHistory: string
+
+  function routes(url: string, init?: RequestInit): unknown {
+    const path = url.replace('https://gmail.googleapis.com/gmail/v1/users/me', '')
+    if (path === '/profile') return { emailAddress: ACCOUNT, historyId: mailboxHistory }
+    if (path.startsWith('/threads?')) return { threads: [{ id: 't1', historyId: '100' }] }
+    if (path.startsWith('/threads/t1?format=full')) return thread
+    if (path.startsWith('/threads/t1?format=metadata'))
+      return {
+        ...thread,
+        messages: [
+          {
+            ...thread.messages[0],
+            payload: { mimeType: 'text/html', headers: [{ name: 'List-Unsubscribe', value: '<https://u.example/x>' }] },
+          },
+        ],
+      }
+    if (path === '/threads/t1/modify') return { body: JSON.parse(String(init?.body)) }
+    throw new Error('unexpected ' + path)
+  }
+
+  beforeEach(async () => {
+    fakeBrowser.reset()
+    mailboxHistory = '500'
+    await fakeBrowser.storage.local.set({
+      oauthClient: { clientId: 'cid' },
+      oauthAccounts: [{ email: ACCOUNT, refreshToken: 'r', accessToken: 'a', expiresAt: Date.now() + 3600_000 }],
+    })
+    fetchMock = vi.fn(async (url: string, init?: RequestInit) => Response.json(routes(url, init)))
+    vi.stubGlobal('fetch', fetchMock)
+  })
   afterEach(() => {
     vi.unstubAllGlobals()
-  })
-  function stub(postStatuses: number[]) {
-    let pages = 0
-    const fetchMock = vi.fn(async (_href: string, init?: RequestInit) =>
-      init?.method === 'POST'
-        ? new Response('', { status: postStatuses.shift() ?? 200 })
-        : new Response(page(`tok${++pages}-aaaaaaaaaaaaaaaaaaaa:1793256983817`)),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-    return fetchMock
-  }
-  const sentTokens = (fetchMock: ReturnType<typeof stub>) =>
-    fetchMock.mock.calls
-      .filter(([, init]) => init?.method === 'POST')
-      .map(([, init]) => (init!.headers as Record<string, string>)['X-Framework-Xsrf-Token']!.split('-')[0])
-
-  it('reads the token and client header from the Gmail page', () => {
-    const s = parseSyncSession(page('tok-aaaaaaaaaaaaaaaaaaaa:1793256983817'))
-    expect(s.xsrf).eq('tok-aaaaaaaaaaaaaaaaaaaa:1793256983817')
-    const btai = JSON.parse(s.btai)
-    expect([btai[4], btai[7], btai[15]]).toEqual(['af1be7b5ba', 'gmail.pinto-server_20261026.16_p2', 1008422238])
-    expect(() => parseSyncSession('<html></html>')).toThrow('xsrf, ik, build, globalsId')
+    vi.stubGlobal('browser', fakeBrowser)
   })
 
-  it('marks as read by removing the unread labels through /sync', async () => {
-    // The old /s/?v=or endpoint answered every action with its re-auth page.
-    const fetchMock = stub([200])
-    await markAsRead(THREAD_URL)
-    const [href, init] = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')!
-    expect(href).toMatch(/^https:\/\/mail\.google\.com\/sync\/u\/7\/i\/s\?/)
-    expect(init!.body).toContain(
-      '["thread-f:1880360958841165487",[null,null,null,null,null,null,[null,["^u","^us"],["msg-f:1880360958841165487"]]]]',
-    )
+  const calledPaths = () => fetchMock.mock.calls.map(([url]) => new URL(url).pathname.split('/users/me')[1])
+
+  it('fetches the inbox once, then answers from the cache while historyId is unchanged', async () => {
+    const [inbox] = await getAllRSS()
+    expect(inbox!.email).toBe(ACCOUNT)
+    expect(inbox!.feeds.map((it) => it.url)).toEqual([threadUrl(ACCOUNT, 't1')])
+    expect(calledPaths()).toEqual(['/profile', '/threads', '/threads/t1'])
+    expect(fetchMock.mock.calls[0]![1].headers.Authorization).toBe('Bearer a')
+
+    fetchMock.mockClear()
+    await getAllRSS()
+    expect(calledPaths()).toEqual(['/profile'])
+
+    // Mailbox changed, but this thread didn't: listed again, not re-fetched.
+    fetchMock.mockClear()
+    mailboxHistory = '501'
+    await getAllRSS()
+    expect(calledPaths()).toEqual(['/profile', '/threads'])
+
+    fetchMock.mockClear()
+    expect((await getThreadMail(threadUrl(ACCOUNT, 't1'))).messages[0]!.contentText).toBe('one')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('retries once with a fresh token, then rejects instead of pretending it worked', async () => {
-    const retried = stub([500, 200])
-    await markAsRead(THREAD_URL.replace('/u/7/', '/u/8/'))
-    expect(sentTokens(retried)).toEqual(['tok1', 'tok2'])
-
-    stub([500, 500])
-    await expect(markAsRead(THREAD_URL.replace('/u/7/', '/u/9/'))).rejects.toThrow('500')
+  it('skips accounts that need a fresh sign-in', async () => {
+    await fakeBrowser.storage.local.set({
+      oauthAccounts: [{ email: ACCOUNT, refreshToken: 'r', accessToken: 'a', expiresAt: 0, needsReauth: true }],
+    })
+    await expect(getAllRSS()).rejects.toThrow('no signed-in account')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('shares one page fetch between parallel actions', async () => {
-    const fetchMock = stub([200, 200])
-    const url = THREAD_URL.replace('/u/7/', '/u/10/')
-    await Promise.all([markAsRead(url), markAsRead(url)])
-    expect(fetchMock.mock.calls.filter(([, init]) => init?.method !== 'POST')).toHaveLength(1)
+  it('retries once with a refreshed token on 401', async () => {
+    let first = true
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === 'https://oauth2.googleapis.com/token') return Response.json({ access_token: 'b', expires_in: 3600 })
+      if (first) {
+        first = false
+        return new Response('', { status: 401 })
+      }
+      return Response.json(routes(url, init))
+    })
+    await markAsSpam(threadUrl(ACCOUNT, 't1'))
+    const modify = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/modify'))
+    expect(modify.map(([, init]) => init.headers.Authorization)).toEqual(['Bearer a', 'Bearer b'])
+    expect(JSON.parse(modify[1]![1].body)).toEqual({ addLabelIds: ['SPAM'], removeLabelIds: ['INBOX'] })
+  })
+
+  it('builds a header block planUnsubscribe can read', async () => {
+    expect(await getRawMessage(threadUrl(ACCOUNT, 't1'))).toBe('List-Unsubscribe: <https://u.example/x>\r\n\r\n')
   })
 })

@@ -1,28 +1,50 @@
-# Gmail Notifier
+# Mailbell for Gmail
 
-An **open-source** Gmail notifier extension for your browser.
+A Firefox toolbar extension that tells you when new Gmail arrives and lets you read, archive, delete or unsubscribe without opening Gmail.
+
+Mailbell signs in with Google OAuth and talks to the official [Gmail API](https://developers.google.com/gmail/api). It never reads your Gmail cookies or scrapes the Gmail web page.
 
 ## Features
 
-- **Open Source** - All extension code is publicly available and auditable
-- **Real-time Notifications** - Get instant desktop notifications for new emails
-- **Quick Actions** - Mark as read, archive, delete emails without opening Gmail
-- **Bulk Operations** - Mark all emails as read with one click
-- **Modern UI** - Clean, intuitive interface that works seamlessly, with automatic light/dark theme
-- **Privacy Focused** - All code is auditable; the only telemetry is an anonymous daily install ping (no URLs, no page content, no behavioral data) via [extport](https://extport.dev)
+- Desktop notifications for new unread mail in your inbox, with an optional custom sound.
+- Several Google accounts side by side.
+- Read whole threads in the popup, including HTML mail, inline images and attachments, with automatic dark mode.
+- Archive, delete, mark as read or unread, or report spam, for one thread or in bulk.
+- One-click unsubscribe (RFC 8058) when the sender supports it.
+- One-time codes from verification emails shown ready to copy.
 
-## Installation
+## Privacy
 
-### Chrome/Edge/Brave
+Your mail goes only between your browser and Google. Mailbell has no server, no analytics and no telemetry. Tokens and cached mail stay in the extension's local storage. Removing an account revokes its token with Google.
 
-1. Visit the [Chrome Web Store](https://chromewebstore.google.com/detail/gmail-notifier/liabcmaifgemdglcbialogmljhekgnle?authuser=0&hl=en)
-2. Click "Add to Chrome"
-3. Follow the setup instructions
+Mailbell asks for the `gmail.modify` scope. That scope lets it read mail and change labels (read, archive, spam, trash). It cannot delete mail permanently or send mail.
 
-### Firefox
+## Sign-in and the "unverified app" warning
 
-1. Visit the [Firefox Add-ons](https://addons.mozilla.org/en-US/firefox/addon/gmail-notifier233/) page
-2. Click "Add to Firefox"
-3. Follow the setup instructions
+Google classes Gmail scopes as *restricted*. Until an app passes Google's verification and security assessment, Google treats it as unverified:
 
-Join our [Discord server](https://discord.gg/gFhKUthc88) for support or to report issues.
+- Sign-in shows a "Google hasn't verified this app" screen. Click **Advanced → Go to Mailbell (unsafe)** to continue.
+- The built-in client is limited to 100 users in total.
+
+To avoid both, use your own Google Cloud OAuth client. Go to **Settings → Google OAuth client** in the popup and follow [docs/SETUP.md](docs/SETUP.md). It takes about five minutes, is free, and the client is used only by you.
+
+## Development
+
+```sh
+pnpm install
+cp .env.example .env    # optional: built-in OAuth client, see docs/SETUP.md
+pnpm dev:firefox        # or: pnpm dev (Chrome)
+pnpm test               # vitest in headless Chromium
+pnpm compile            # type-check
+pnpm zip:firefox        # AMO upload + sources zip in .output/
+```
+
+Without a `.env`, the build has no built-in client. Add a client under **Settings** before you sign in.
+
+## Credits
+
+Mailbell is a fork of [rxliuli/gmail-notifier](https://github.com/rxliuli/gmail-notifier). The original reads Gmail through your browser session; Mailbell replaces that layer with OAuth and the Gmail API.
+
+## License
+
+[GPL-3.0](LICENSE.md)

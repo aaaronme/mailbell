@@ -2,6 +2,8 @@ import { bgMessager, popupMessager } from '@/lib/messager'
 import {
   archiveMail,
   checkLoginStatus,
+  clearInboxCache,
+  composeUrl,
   deleteMail,
   getActiveInboxUrl,
   getAllRSS,
@@ -11,9 +13,9 @@ import {
   markAsSpam,
   markAsUnread,
   openMailInWeb,
-  parseAccountSlot,
-  rememberActiveSlot,
+  parseThreadUrl,
 } from '@/lib/api/gmail'
+import { removeAccount, signIn } from '@/lib/auth/oauth'
 import type { PublicPath } from 'wxt/browser'
 import { StateManager, type EmailThread } from '@/lib/StateManager'
 import { getThreadCode } from '@/lib/otp'
@@ -40,7 +42,7 @@ function withCode(thread: EmailThread) {
 }
 
 async function sendNotification(stateManager: StateManager, feed: EmailThread) {
-  const notificationId = `gmail-notifier-${import.meta.env.MODE}-${feed.url}`
+  const notificationId = `mailbell-${import.meta.env.MODE}-${feed.url}`
 
   if (stateManager.notifiedEmails.has(feed.url)) {
     return
@@ -95,7 +97,7 @@ async function start() {
   // One listener for every notification; adding one per notification piled
   // them up, so each click ran every earlier one too.
   browser.notifications?.onClicked.addListener(async (id) => {
-    if (!id.startsWith('gmail-notifier-')) return
+    if (!id.startsWith('mailbell-')) return
     await browser.notifications.clear(id)
     await browser.action.openPopup()
   })
@@ -198,75 +200,22 @@ async function start() {
     browser.alarms.clear('fetchThreads')
   })
 
-  // listen to webRequest
-  // Gmail's own tab, when open, hits /sync/* via long-polling multiple
-  // times a second - unthrottled, that fired fetchThreads() at the same
-  // rate. Each completion notifies listeners (badge, popup push), so with
-  // the popup open this was re-rendering it in a tight loop, felt as
-  // sluggish scrolling (worse on Safari's WKWebView popup than Chrome's).
-  // The 30s alarm above already guarantees a baseline poll; this listener
-  // only needs to react faster than that, not react to every single ping.
-  const WEBREQUEST_FETCH_COOLDOWN_MS = 10_000
-  let lastWebRequestFetchAt = 0
-  browser.webRequest.onBeforeRequest.addListener(
-    (details) => {
-      const now = Date.now()
-      // The sync URLs themselves carry the account slot
-      // (https://mail.google.com/sync/u/1/i/s...) - a free, real-time signal
-      // for which account the user is actively using, remembered so "open
-      // Gmail" and "compose" go there. Only pings from the *active* tab count:
-      // with two Gmail tabs on different accounts, both long-poll
-      // continuously, and without that filter they'd fight over the slot on
-      // every ping.
-      void (async () => {
-        const slot = parseAccountSlot(details.url)
-        if (slot === null || details.tabId < 0) {
-          return
-        }
-        const tab = await browser.tabs.get(details.tabId).catch(() => null)
-        if (!tab?.active) {
-          return
-        }
-        await rememberActiveSlot(slot)
-      })()
-      if (now - lastWebRequestFetchAt < WEBREQUEST_FETCH_COOLDOWN_MS) {
-        return {}
-      }
-      lastWebRequestFetchAt = now
-      setTimeout(() => stateManager.fetchThreads(), 1000)
-      return {}
-    },
-    {
-      urls: ['https://mail.google.com/sync/*'],
-    },
-  )
-
-  // Firefox stamps the extension's action POST with Origin: moz-extension://…;
-  // present it as Gmail's own, the only form the write API was seen to accept.
-  if (import.meta.env.FIREFOX) {
-    const ownOrigin = new URL(browser.runtime.getURL('/')).origin
-    browser.webRequest.onBeforeSendHeaders.addListener(
-      (details) => {
-        const originUrl = (details as { originUrl?: string }).originUrl ?? ''
-        if (details.method !== 'POST' || !originUrl.startsWith(ownOrigin)) {
-          return {}
-        }
-        const headers = (details.requestHeaders ?? []).map((h) => {
-          const name = h.name.toLowerCase()
-          if (name === 'origin') return { name: h.name, value: 'https://mail.google.com' }
-          if (name === 'sec-fetch-site') return { name: h.name, value: 'same-origin' }
-          return h
-        })
-        return { requestHeaders: headers }
-      },
-      { urls: ['https://mail.google.com/sync/u/*/i/s*'] },
-      ['blocking', 'requestHeaders'],
-    )
-  }
-
-
   // listen to message
   bgMessager.onMessage('refreshThreads', () => stateManager.refresh())
+  // Sign-in runs here, not in the popup: the popup closes the moment
+  // Google's sign-in window takes focus, taking any pending work with it.
+  bgMessager.onMessage('addAccount', async ({ data: loginHint }) => {
+    const account = await signIn(loginHint)
+    await debugLog('background: signed in ->', account.email)
+    await clearInboxCache(account.email)
+    await stateManager.refresh()
+    return account.email
+  })
+  bgMessager.onMessage('removeAccount', async ({ data: email }) => {
+    await removeAccount(email)
+    await clearInboxCache(email)
+    await stateManager.refresh()
+  })
   bgMessager.onMessage('unsubscribe', async ({ data: url }) => {
     const html = stateManager.threads.find((t) => t.url === url)?.messages.at(-1)?.contentHtml ?? ''
     // The body link still works without headers, so a failed fetch only
@@ -294,8 +243,8 @@ async function start() {
       await browser.tabs.create({ url: plan.url })
     } else {
       // Composed from the account the newsletter was sent to.
-      const params = new URLSearchParams({ view: 'cm', fs: '1', to: plan.to, su: plan.subject })
-      await browser.tabs.create({ url: `https://mail.google.com/mail/u/${parseAccountSlot(url) ?? '0'}/?${params}` })
+      const account = parseThreadUrl(url)?.account ?? ''
+      await browser.tabs.create({ url: composeUrl(account, { to: plan.to, su: plan.subject }) })
     }
     return plan.kind
   })
@@ -371,11 +320,9 @@ async function start() {
   await fetchThreadsWithRetry(stateManager)
 }
 
-// Confirmed on Safari: a manual fetch(..., {credentials:'include'}) run from
-// the console a moment later succeeds fine with the exact same code that
-// just 401'd here - looks like the cookie/ITP state isn't fully settled in
-// the first instant the service worker starts. Retry a few times instead of
-// giving up after one attempt right at cold start.
+// The network isn't always up the instant the browser starts the background
+// (waking from sleep, captive portals). Retry a few times instead of giving
+// up after one attempt right at cold start.
 async function fetchThreadsWithRetry(
   stateManager: StateManager,
   attempts = 3,

@@ -24,7 +24,7 @@ export interface GmailApi {
 // https://stackoverflow.com/questions/66618136/persistent-service-worker-in-chrome-extension#:~:text=%E2%AD%95%20Bug%20exploit%20in%20Chrome%20110%2B
 export class StateManager {
   isLoggedIn: boolean = false
-  // Signed-in accounts, in Gmail's slot order.
+  // Signed-in accounts, in the order they were added.
   accounts: string[] = []
   threads: EmailThread[] = []
   notifiedEmails: Set<string> = new Set()
@@ -120,6 +120,9 @@ export class StateManager {
       this.isLoggedIn = await this.api.checkLoginStatus()
       await debugLog('fetchThreads: checkLoginStatus ->', this.isLoggedIn)
       if (!this.isLoggedIn) {
+        // The last account was removed or needs a fresh sign-in.
+        this.accounts = []
+        this.threads = []
         await this.notify()
         return
       }
@@ -129,7 +132,7 @@ export class StateManager {
         rssList.map((rss) => ({ email: rss.email, feedCount: rss.feeds.length })),
       )
       this.accounts = rssList.map((rss) => rss.email)
-      // Thread URLs carry the account (slot and account_id), so one merged
+      // Thread URLs carry the account (authuser), so one merged
       // list never confuses two accounts' threads. Feed entries are tagged
       // with their account here so the popup can label them.
       const feeds = rssList.flatMap((rss) => rss.feeds.map((it) => ({ ...it, account: rss.email })))

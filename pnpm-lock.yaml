@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@extport/sdk':
-        specifier: ^0.0.9
-        version: 0.0.9(react@19.2.8)
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.2.0(@types/node@26.1.2)(jiti@2.7.0))
@@ -78,9 +75,6 @@ importers:
         specifier: ^1.4.0
         version: 1.4.0
     devDependencies:
-      '@extport/wxt':
-        specifier: ^0.0.12
-        version: 0.0.12(@extport/sdk@0.0.9(react@19.2.8))(wxt@0.21.3(rolldown@1.2.3)(typescript@7.0.2)(vite@8.2.0(@types/node@26.1.2)(jiti@2.7.0)))
       '@types/node':
         specifier: ^26.1.2
         version: 26.1.2
@@ -161,24 +155,6 @@ packages:
 
   '@blazediff/core@1.9.1':
     resolution: {integrity: sha512-ehg3jIkYKulZh+8om/O25vkvSsXXwC+skXmyA87FFx6A/45eqOkZsBltMw/TVteb0mloiGT8oGRTcjRAz66zaA==}
-
-  '@extport/sdk@0.0.9':
-    resolution: {integrity: sha512-mniP2vPVAa4aabguH5HmEcboH8y9fQ43YD20pCFKbnOP1KfLqnNd1kq8mg88X2EnSc4KJKZERVSOE5UDM01p7Q==}
-    peerDependencies:
-      react: '>=18'
-    peerDependenciesMeta:
-      react:
-        optional: true
-
-  '@extport/wxt@0.0.12':
-    resolution: {integrity: sha512-N3J2stH7mdRsVJQ5Sv8DTSl9imnABYmkzfdkPdNHcftLXUNp8++RbTeVgcEH7v5R9VQVZhrmPmvhxiWZr2cO3w==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      '@extport/sdk': '>=0.0.5'
-      wxt: '>=0.20.0'
-    peerDependenciesMeta:
-      '@extport/sdk':
-        optional: true
 
   '@floating-ui/core@1.8.0':
     resolution: {integrity: sha512-0CIZ5itps/8x7BG8dEIhs53BvCUH2PCoogtakwRTut+Arm58sJooJ0AuZhLw2HJYIR5cMLNPBSS728sPho2khQ==}
@@ -1607,9 +1583,6 @@ packages:
   humps@2.0.1:
     resolution: {integrity: sha512-E0eIbrFWUhwfXJmsbdjRQFQPrl5pTEoKlz163j1mTqqUnU9PgR4AgB8AIITzuB3vLBdxZXyZ9TDIrwB2OASz4g==}
 
-  idb-keyval@6.3.0:
-    resolution: {integrity: sha512-um+2dgAWmYsu615EXpWVwSmapJhON0G43t3Ka/EVaohzPQXSMqKEqeDK/oIW3Ow+BXaF2PvSc+oBTFp793A5Ow==}
-
   is-docker@2.2.1:
     resolution: {integrity: sha512-F+i2BKsFrH66iaUFc0woD8sLy8getkwTwtOBjvs56Cx4CgJDeKQeqfz8wAYiSb8JOprWhHH5p77PbmYCvvUuXQ==}
     engines: {node: '>=8'}
@@ -2392,18 +2365,6 @@ snapshots:
       '@babel/helper-validator-identifier': 7.29.7
 
   '@blazediff/core@1.9.1': {}
-
-  '@extport/sdk@0.0.9(react@19.2.8)':
-    dependencies:
-      idb-keyval: 6.3.0
-    optionalDependencies:
-      react: 19.2.8
-
-  '@extport/wxt@0.0.12(@extport/sdk@0.0.9(react@19.2.8))(wxt@0.21.3(rolldown@1.2.3)(typescript@7.0.2)(vite@8.2.0(@types/node@26.1.2)(jiti@2.7.0)))':
-    dependencies:
-      wxt: 0.21.3(rolldown@1.2.3)(typescript@7.0.2)(vite@8.2.0(@types/node@26.1.2)(jiti@2.7.0))
-    optionalDependencies:
-      '@extport/sdk': 0.0.9(react@19.2.8)
 
   '@floating-ui/core@1.8.0':
     dependencies:
@@ -3750,8 +3711,6 @@ snapshots:
       entities: 8.0.0
 
   humps@2.0.1: {}
-
-  idb-keyval@6.3.0: {}
 
   is-docker@2.2.1: {}
 

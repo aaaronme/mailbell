@@ -8,7 +8,7 @@ import type { EmailThread } from './StateManager'
 //
 // This deliberately doesn't try to trigger the actual remote Gmail fetch -
 // that only happens in background (via 'refreshThreads' or its own
-// alarm/webRequest triggers). This hook only reads whatever background last
+// alarm). This hook only reads whatever background last
 // wrote. Call `queryClient.invalidateQueries({ queryKey: mailQueryKey })`
 // after anything that can change that data - a background push arriving, or
 // a message to background that's expected to have updated it - and every

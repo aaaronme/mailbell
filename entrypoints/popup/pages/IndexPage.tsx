@@ -15,6 +15,7 @@ import {
   BugIcon,
   CopyIcon,
   BellIcon,
+  SettingsIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { debugLog } from '@/lib/debugLog'
@@ -27,10 +28,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { FaDiscord, FaGithub } from 'react-icons/fa'
+import { FaGithub } from 'react-icons/fa'
 import type { EmailThread } from '@/lib/StateManager'
 import { getThreadCode } from '@/lib/otp'
 import { MailActions, urlsFromSender } from '@/components/extra/MailActions'
+import { useAccounts } from '@/lib/useAccounts'
+import { addAccount } from './SettingsPage'
 
 function MailItem({
   thread,
@@ -162,10 +165,10 @@ function Toolbar() {
     <div className="flex items-center px-4 py-2 bg-card shadow-sm border-b border-border gap-2 sticky top-0 z-10">
       {/* Gmail icon */}
       <div className="flex items-center">
-        <img src="/icon/48.png" alt="Gmail Notifier" className="w-6 h-6" />
+        <img src="/icon/48.png" alt="Mailbell" className="w-6 h-6" />
       </div>
       <span className="font-medium text-foreground flex-1">
-        {accounts.length ? `${accountLabel} (${mailQuery.data!.threads.length})` : 'Gmail Notifier'}
+        {accounts.length ? `${accountLabel} (${mailQuery.data!.threads.length})` : 'Mailbell'}
       </span>
       {(mailQuery.data?.threads.length ?? 0) > 0 && (
         <Button
@@ -240,6 +243,10 @@ function Toolbar() {
               Notification sound
             </DropdownMenuItem>
           )}
+          <DropdownMenuItem onClick={() => navigate({ to: '/settings' })}>
+            <SettingsIcon />
+            Settings
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => navigate({ to: '/debug' })}>
             <BugIcon />
@@ -247,13 +254,7 @@ function Toolbar() {
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
-            <a href="https://discord.gg/gFhKUthc88" target="_blank">
-              <FaDiscord />
-              Join our community
-            </a>
-          </DropdownMenuItem>
-          <DropdownMenuItem asChild>
-            <a href="https://github.com/rxliuli/gmail-notifier" target="_blank">
+            <a href="https://github.com/aaaronme/mailbell" target="_blank">
               <FaGithub />
               GitHub
             </a>
@@ -285,7 +286,7 @@ function MailList({
   if (accounts.length < 2) {
     return <div className="w-full">{items(threads)}</div>
   }
-  // One section per account, in slot order, including accounts with nothing
+  // One section per account, in the order they were added, including accounts with nothing
   // unread - so every signed-in account is visibly being watched.
   return (
     <div className="w-full">
@@ -301,6 +302,25 @@ function MailList({
           </section>
         )
       })}
+    </div>
+  )
+}
+
+// An account Google signed out (revoked, password change) silently drops out
+// of the list otherwise.
+function ReauthBanner() {
+  const expired = (useAccounts().data ?? []).filter((it) => it.needsReauth)
+  if (!expired.length) return null
+  return (
+    <div className="flex flex-col gap-1 px-4 py-2 text-sm bg-destructive/10 border-b">
+      {expired.map((account) => (
+        <div key={account.email} className="flex items-center gap-2">
+          <span className="flex-1 truncate">{account.email} needs to sign in again</span>
+          <Button size="sm" onClick={() => addAccount(account.email)}>
+            Reconnect
+          </Button>
+        </div>
+      ))}
     </div>
   )
 }
@@ -327,6 +347,7 @@ export function IndexPage() {
   return (
     <div className="flex flex-col min-h-screen">
       <Toolbar />
+      <ReauthBanner />
       <div
         className={cn(
           'flex-1',
@@ -348,9 +369,7 @@ export function IndexPage() {
             onSelectFeed={onSelectFeed}
           />
         ) : (
-          <a href={'https://mail.google.com/mail/u/0/#inbox'} target="_blank">
-            <Button>Please login to Gmail</Button>
-          </a>
+          <Button onClick={() => addAccount()}>Sign in with Google</Button>
         )}
       </div>
       <CodeBar threads={mailQuery.data?.threads ?? []} />

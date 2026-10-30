@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button'
-import { getOpenWebLink, openMailInWeb, type ThreadMail } from '@/lib/api/gmail'
+import { toast } from 'sonner'
+import { getAttachmentBlob, openMailInWeb, type Attachment, type ThreadMail } from '@/lib/api/gmail'
 import { useMailQuery } from '@/lib/useMailQuery'
 import type { EmailThread } from '@/lib/StateManager'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
@@ -193,13 +194,30 @@ const CollapsedMessagesIndicator = memo(
   },
 )
 
+// Attachments are fetched on click: the API serves them as base64 JSON, so
+// there's no plain link to point the browser at.
+async function downloadAttachment(account: string, attachment: Attachment) {
+  try {
+    const url = URL.createObjectURL(await getAttachmentBlob(account, attachment))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = attachment.fileName
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  } catch (err) {
+    console.error(err)
+    toast.error(`Download failed: ${attachment.fileName}`)
+  }
+}
+
 const MailMessage = function MailMessage(props: {
+  account: string
   message: ThreadMail['messages'][number]
   styles: string[]
   collapsed: boolean
   onToggle: () => void
 }) {
-  const { message, styles, collapsed, onToggle } = props
+  const { account, message, styles, collapsed, onToggle } = props
 
   if (collapsed) {
     return (
@@ -266,16 +284,15 @@ const MailMessage = function MailMessage(props: {
       {message.attachments && message.attachments.length > 0 && (
         <div className="flex flex-wrap gap-2 mt-2">
           {message.attachments.map((attachment) => (
-            <a
-              key={attachment.url}
-              href={attachment.url}
-              target="_blank"
-              rel="noopener noreferrer"
+            <button
+              key={attachment.attachmentId}
+              type="button"
+              onClick={() => downloadAttachment(account, attachment)}
               className="flex items-center gap-1 px-2 py-1 text-sm text-muted-foreground bg-muted rounded hover:bg-accent"
             >
               <PaperclipIcon className="w-3 h-3" />
               <span className="truncate max-w-[200px]">{attachment.fileName}</span>
-            </a>
+            </button>
           ))}
         </div>
       )}
@@ -354,6 +371,7 @@ export function DetailPage() {
             return (
               <MailMessage
                 key={`${message.senderEmail}-${message.time}-${i}`}
+                account={thread.account}
                 message={message}
                 styles={thread.styles}
                 collapsed={collapseStore.contentIndexes.has(i)}
@@ -387,7 +405,7 @@ function DetailToolbar(props: {
       </Button>
       <a
         className="font-medium text-foreground flex-1 min-w-0 truncate"
-        href={getOpenWebLink(thread.url)}
+        href={thread.url}
         title="Open in Gmail"
         onClick={(ev) => {
           ev.preventDefault()

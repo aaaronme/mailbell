@@ -12,6 +12,7 @@ import { IndexPage } from './pages/IndexPage'
 import { DetailPage } from './pages/DetailPage'
 import { DebugLogPage } from './pages/DebugLogPage'
 import { SoundPage } from './pages/SoundPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { fetchMailQuery, mailQueryKey } from '@/lib/useMailQuery'
 import { queryClient } from '@/lib/queryClient'
 
@@ -93,7 +94,13 @@ export const soundRoute = createRoute({
   component: SoundPage,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, detailRoute, debugRoute, soundRoute])
+export const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings',
+  component: SettingsPage,
+})
+
+const routeTree = rootRoute.addChildren([indexRoute, detailRoute, debugRoute, soundRoute, settingsRoute])
 
 // A factory rather than exporting one fixed instance: tests need their own
 // router with a specific starting location (e.g. straight into

@@ -8,6 +8,11 @@ export const bgMessager = defineExtensionMessaging<{
   gmailAction(data: GmailAction): void
   // popup to background: thread url -> how it was done, null if no option
   unsubscribe(url: string): UnsubscribePlan['kind'] | null
+  // popup to background: interactive Google sign-in, optionally for a known
+  // address (reconnect) -> the signed-in address
+  addAccount(loginHint?: string): string
+  // popup to background
+  removeAccount(email: string): void
 }>()
 
 export type GmailAction =

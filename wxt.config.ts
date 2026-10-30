@@ -2,19 +2,7 @@ import { defineConfig, type UserManifest } from 'wxt'
 import tailwindcss from '@tailwindcss/vite'
 
 export default defineConfig({
-  modules: ['@wxt-dev/module-react', '@extport/wxt'],
-  extport: {
-    extension: 'ext_lvL1FBBhpL2nsJE2QBhx',
-    safari: {
-      appCategory: 'public.app-category.productivity',
-      bundleIdentifier: 'com.rxliuli.gmail-notifier',
-      developmentTeam: 'N2X78TUUFG',
-      issuerId: '48f39427-c063-4e33-98d2-31de80aad0be',
-      keyId: '8N27UWG9RG',
-      projectType: 'macos',
-    },
-    analytics: true,
-  },
+  modules: ['@wxt-dev/module-react'],
   vite: () => ({
     plugins: [tailwindcss()] as any,
     build: {
@@ -24,24 +12,17 @@ export default defineConfig({
   }),
   manifestVersion: 3,
   zip: {
-    name: 'gmail-notifier',
+    name: 'mailbell',
   },
   manifest: (env) => {
     const manifest: UserManifest = {
-      name: 'Gmail Notifier',
+      name: 'Mailbell for Gmail',
       description:
-        'Get notified of new emails in your browser and quickly manage your messages.',
-      permissions: [
-        'storage',
-        'cookies',
-        'alarms',
-        'webRequest',
-        'contextMenus',
-      ],
-      host_permissions: ['https://mail.google.com/**'],
-      author: {
-        email: 'rxliuli@gmail.com',
-      },
+        'Get notified of new Gmail mail and read, archive or delete it right from the toolbar. Uses the official Gmail API.',
+      permissions: ['storage', 'alarms', 'contextMenus', 'notifications', 'idle', 'identity'],
+      // Google's token endpoint and the Gmail API, nothing else: mail is
+      // read with an OAuth token, never with the browser's Gmail cookies.
+      host_permissions: ['https://oauth2.googleapis.com/*', 'https://gmail.googleapis.com/*'],
       action: {
         default_icon: {
           '16': 'icon/16.png',
@@ -51,52 +32,23 @@ export default defineConfig({
           '128': 'icon/128.png',
         },
       },
-      homepage_url: 'https://github.com/rxliuli/gmail-notifier',
-    }
-    if (env.browser === 'chrome' || env.browser === 'edge') {
-      manifest.permissions!.push('notifications', 'idle')
+      homepage_url: 'https://github.com/aaaronme/mailbell',
     }
     if (env.browser === 'firefox') {
-      manifest.permissions!.push('notifications', 'idle', 'webRequestBlocking')
       manifest.browser_specific_settings = {
         gecko: {
-          id:
-            manifest.name!.toLowerCase().replaceAll(' ', '-') + '@rxliuli.com',
+          id: 'mailbell@aaaronme.github.io',
+          // data_collection_permissions needs 140.
+          strict_min_version: '140.0',
+          data_collection_permissions: {
+            // Mail goes only between the browser and Google; nothing is sent
+            // to the developer or any other party.
+            required: ['none'],
+          },
         },
       }
-      // https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/manifest.json/author
-      // @ts-expect-error
-      manifest.author = 'rxliuli'
-    }
-    if (env.browser === 'safari') {
-      manifest.name = 'Inbox Notifier for Gmail'
-      // Safari caps storage.local at 5MB (in practice it failed at ~330KB), and
-      // once over quota every set() is rejected, wedging the extension.
-      // unlimitedStorage lifts the cap on Safari 16+.
-      manifest.permissions!.push('unlimitedStorage')
     }
     return manifest
-  },
-  hooks: {
-    // Safari's MV3 service_worker background is badly limited (multiple
-    // WebKit/Safari-18 bugs: fetch(credentials:'include') and
-    // cookies.getAll() silently missing cookies from a service worker,
-    // confirmed via Apple's own developer forums). Rewriting it to the MV2
-    // `scripts` form routes through a more mature code path that doesn't
-    // have this problem. persistent: false keeps it non-persistent still.
-    'build:manifestGenerated': (wxt, manifest) => {
-      if (
-        wxt.config.browser === 'safari' &&
-        manifest.background &&
-        'service_worker' in manifest.background
-      ) {
-        const sw = manifest.background.service_worker
-        manifest.background = {
-          scripts: [sw],
-          persistent: false,
-        }
-      }
-    },
   },
   webExt: {
     disabled: true,

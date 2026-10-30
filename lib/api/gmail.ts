@@ -1,7 +1,5 @@
-import { last } from 'es-toolkit'
-import dayjs from 'dayjs'
-import customParseFormat from 'dayjs/plugin/customParseFormat'
 import { parse } from 'parse5'
+import { decodeHTML, escapeUTF8 } from 'entities'
 import {
   getAttribute,
   getInnerHTML,
@@ -11,15 +9,16 @@ import {
   querySelectorAll,
   setAttribute,
 } from '../domutils'
-import { decodeHTML } from 'entities'
 import { debugLog } from '../debugLog'
 import { liftBackgroundImages } from '../emailBackground'
-
-dayjs.extend(customParseFormat)
+import { getAccessToken, getAccounts } from '../auth/oauth'
 
 export interface Feed {
   title: string
   summary: string
+  // Identifies the thread everywhere (popup routes, actions, notifications):
+  // a real Gmail link that also carries the account and thread id, see
+  // threadUrl().
   url: string
   modified: string
   author: {
@@ -30,178 +29,15 @@ export interface Feed {
 
 export interface RSSInfo {
   email: string
-  modified: string
   feeds: Feed[]
 }
 
-export function extractRSS(text: string): RSSInfo {
-  const doc = parse(text)
-  const entries = querySelectorAll('entry', doc)
-  const feeds = [...entries]
-    .map((entry) => {
-      const title = getTextContent(querySelector('title', entry)) || ''
-      const url = getAttribute(querySelector('link', entry), 'href')
-      const summary = getTextContent(querySelector('summary', entry)) || ''
-      if (!url) {
-        throw new Error('url not found')
-      }
-      const modified = getTextContent(querySelector('modified', entry))
-      const name = getTextContent(querySelector('author > name', entry))
-      const email = getTextContent(querySelector('author > email', entry))
-      if (!modified || !name || !email) {
-        throw new Error('modified or name or email not found')
-      }
-      return {
-        title,
-        summary,
-        url,
-        modified,
-        author: { name, email },
-      } satisfies Feed
-    })
-    .filter(Boolean) as Feed[]
-  const modified = getTextContent(querySelector('modified', doc))
-  const title = getTextContent(querySelector('title', doc))
-  if (!modified || !title) {
-    throw new Error('modified or title or baseUrl not found')
-  }
-  const email = last(title.split(' '))
-  if (!email) {
-    throw new Error('email not found')
-  }
-  return {
-    email,
-    modified,
-    feeds,
-  }
-}
-
-// Gmail assigns each signed-in account a slot in the URL path (/mail/u/0,
-// /mail/u/1, ...) by sign-in order. Everything below used to hardcode slot 0,
-// which pinned the extension to whichever account signed in first and
-// silently ignored the account the user actually switched to.
-export function parseAccountSlot(url: string): string | null {
-  return url.match(/\/u\/(\d+)([/?#]|$)/)?.[1] ?? null
-}
-
-const ACTIVE_SLOT_KEY = 'activeSlot'
-
-async function getStoredActiveSlot(): Promise<string> {
-  const { [ACTIVE_SLOT_KEY]: slot } = await browser.storage.local.get<{ [ACTIVE_SLOT_KEY]?: string }>(ACTIVE_SLOT_KEY)
-  return slot ?? '0'
-}
-
-// Called on every Gmail sync ping (several a second), so only write when the
-// slot actually changed.
-export async function rememberActiveSlot(slot: string): Promise<void> {
-  if ((await getStoredActiveSlot()) !== slot) {
-    await browser.storage.local.set({ [ACTIVE_SLOT_KEY]: slot })
-  }
-}
-
-// Which account do "open Gmail" and "compose" go to? In order:
-// 1. The Gmail tab the user most recently had active - the clearest signal
-//    of intent, and the one that makes "I switched accounts in Gmail" just
-//    work. (On Chrome/Firefox the background's sync-ping listener usually
-//    gets there first; this covers Safari, where webRequest never fires,
-//    and the service worker having been asleep during the switch.)
-// 2. The last slot observed via either signal, persisted across restarts.
-// 3. Slot 0, Gmail's default account.
-export async function detectActiveSlot(): Promise<string> {
-  try {
-    const tabs = await browser.tabs.query({ url: 'https://mail.google.com/*' })
-    const candidates = tabs
-      .map((tab) => ({ tab, slot: tab.url ? parseAccountSlot(tab.url) : null }))
-      .filter((it): it is { tab: (typeof tabs)[number]; slot: string } => it.slot !== null)
-    if (candidates.length > 0) {
-      // lastAccessed is missing on some browsers - fall back to preferring
-      // the active tab. Consistent within any one browser, which is all the
-      // comparison needs.
-      const score = (tab: (typeof tabs)[number]) => tab.lastAccessed ?? (tab.active ? 1 : 0)
-      candidates.sort((a, b) => score(b.tab) - score(a.tab))
-      return candidates[0]!.slot
-    }
-  } catch (err) {
-    await debugLog('detectActiveSlot: tabs query failed ->', err)
-  }
-  return getStoredActiveSlot()
-}
-
-async function fetchFeedForSlot(slot: string): Promise<RSSInfo | null> {
-  const resp = await fetch(`https://mail.google.com/mail/u/${slot}/feed/atom?t=` + Date.now(), {
-    credentials: 'include',
-  })
-  const text = await resp.text()
-  await debugLog('fetchFeedForSlot: response ->', {
-    slot,
-    status: resp.status,
-    ok: resp.ok,
-    contentType: resp.headers.get('content-type'),
-    redirected: resp.redirected,
-    url: resp.url,
-    bodyPreview: text.slice(0, 300),
-  })
-  // An out-of-range slot doesn't 404 or bounce to the login page - confirmed
-  // live, Gmail 302s it straight to u/0's feed (and a fully signed-out
-  // session 302s to accounts.google.com). Either way resp.url no longer
-  // carries the slot we asked for, which is the only reliable tell.
-  //
-  // Only that redirect means "no account here". An HTTP error has to throw
-  // instead: getAllRSS cuts the account list at the first null, so a single
-  // transient 5xx would otherwise look like a sign-out - dropping that
-  // account's threads and re-notifying all of them on the next good poll.
-  if (!resp.ok) {
-    throw new Error(`fetchFeedForSlot: u/${slot} feed -> ${resp.status}`)
-  }
-  if (parseAccountSlot(resp.url) !== slot) {
-    return null
-  }
-  const rss = extractRSS(text)
-  return {
-    ...rss,
-    // Rewrite each entry's slot to the one that actually served this feed.
-    // Confirmed live: the feed's entry links hardcode /u/0 no matter which
-    // slot was fetched, and everything downstream - thread detail fetches,
-    // archive/read/delete actions (their at/ik tokens), open-in-web links -
-    // derives its slot from the thread URL. Without this rewrite, every
-    // action on a non-default account would run against account 0.
-    feeds: rss.feeds.map((feed) => ({
-      ...feed,
-      url: feed.url.replace(/\/u\/\d+/, `/u/${slot}`),
-    })),
-  }
-}
-
-const ACCOUNT_COUNT_KEY = 'accountCount'
-
-// Every signed-in account's feed, in slot order. Slots are contiguous from 0
-// and an out-of-range one is detectable (fetchFeedForSlot returns null), so
-// fetch the slots seen last time plus one more in parallel and cut at the
-// first miss: a steady-state poll costs one request per account plus a
-// single probe, and a newly signed-in account shows up on the next poll.
-export async function getAllRSS(): Promise<RSSInfo[]> {
-  const { [ACCOUNT_COUNT_KEY]: known = 1 } = await browser.storage.local.get<{ [ACCOUNT_COUNT_KEY]?: number }>(
-    ACCOUNT_COUNT_KEY,
-  )
-  const slots = Array.from({ length: Math.min(known + 1, MAX_ACCOUNT_SLOTS) }, (_, i) => String(i))
-  // Promise.all, not allSettled: any slot failing aborts the whole poll and
-  // leaves the previous state untouched, rather than treating it as gone.
-  const results = await Promise.all(slots.map(fetchFeedForSlot))
-  const firstMiss = results.indexOf(null)
-  const accounts = (firstMiss === -1 ? results : results.slice(0, firstMiss)) as RSSInfo[]
-  if (accounts.length === 0) {
-    throw new Error('getAllRSS: no signed-in Gmail account responded')
-  }
-  if (accounts.length !== known) {
-    await browser.storage.local.set({ [ACCOUNT_COUNT_KEY]: accounts.length })
-  }
-  return accounts
-}
-
-interface Attachment {
+export interface Attachment {
   fileName: string
-  url: string
-  size?: number
+  mimeType: string
+  size: number
+  messageId: string
+  attachmentId: string
 }
 
 interface Message {
@@ -216,471 +52,551 @@ interface Message {
   attachments?: Attachment[] // Attachments (if any)
 }
 
-// Bumped whenever extractThreadMail's output changes in a way that makes
-// already-extracted HTML wrong: contentHtml is not just a copy of the source,
-// it carries decisions made at extraction time - the dark-mode
-// background-image marker - so HTML produced by another version can render
-// wrong even though the mail itself is unchanged (the old per-image custom
-// properties and message-global board marker are read by nobody now).
+// Bumped whenever the ThreadMail produced from a thread changes in a way that
+// makes an already-built one wrong: contentHtml carries decisions made at
+// extraction time (the dark-mode background-image marker), so HTML produced by
+// another version can render wrong even though the mail itself is unchanged.
+// Stamped onto every ThreadMail; StateManager.fetchThreads drops threads from
+// another version, and the thread cache below ignores them.
 //
-// The value is stamped onto every ThreadMail and compared in
-// StateManager.fetchThreads, which refuses to keep a thread carrying another
-// version. That comparison is the invariant, not the refresh path: threads are
-// not hydrated from storage, so a service worker restart (every extension
-// update) starts with an empty list and re-fetches the whole feed anyway, and
-// the persisted cache is refreshed by that fetch. See the comment at the check
-// for what it does and does not cover.
-//
-// Version 1: background-image blocks are marked whole (data-email-bg) and
-// rendered as-is, text included; the per-image custom properties and the
-// message-global board marker are gone, so HTML extracted by the version that
-// wrote them no longer matches what the dark-mode stylesheet expects and has
-// to be re-extracted.
-export const CURRENT_EXTRACT_VERSION = 1
+// Version 2: built from the Gmail API's MIME parts instead of the print view.
+export const CURRENT_EXTRACT_VERSION = 2
 
 export interface ThreadMail {
   subject: string
   messageCount: number
   messages: Message[]
-  // CSS extracted from <style> tags in the fetched document, applied to each message's shadow root
+  // CSS extracted from the messages' <style> tags, applied to each message's shadow root
   styles: string[]
-  // Which extractThreadMail produced this, see CURRENT_EXTRACT_VERSION.
+  // Which version built this, see CURRENT_EXTRACT_VERSION.
   extractVersion: number
 }
 
-// Strict parsing: MMM is only the short month name, so list full names too.
-const DATE_FORMATS = ['MMM', 'MMMM'].flatMap((m) => [
-  `${m} D, YYYY h:mm A`,
-  `${m} D, YYYY H:mm`,
-  `D ${m} YYYY h:mm A`,
-  `D ${m} YYYY H:mm`,
-])
+// --- Thread URLs -----------------------------------------------------------
 
-// Tue, Jun 3, 2025 at 10:12 AM => 2025-06-03T10:12:00.000Z
-// The print view's date text varies (", " or " at " before the time, 12h or
-// 24h, narrow no-break space before AM/PM, day-first). An unknown format
-// returns '' - a missing time beats dropping every account's mail.
-const loggedDateFormats = new Set<string>()
-export function formatDate(date: string): string {
-  const cleaned = date
-    .replace(/[\u00a0\u202f]/g, ' ')
-    .replace(/^\w+,\s*/, '')
-    .replace(/(\d{4}),?\s+(?:at\s+)?/, '$1 ')
-  const parsed = dayjs(cleaned, DATE_FORMATS, true)
-  if (!parsed.isValid()) {
-    if (!loggedDateFormats.has(date)) {
-      loggedDateFormats.add(date)
-      void debugLog('formatDate: unknown date format ->', JSON.stringify(date))
-    }
-    return ''
-  }
-  return parsed.toISOString()
+// authuser picks the account in Gmail's web UI by address, so the link opens
+// the right mailbox no matter in which order the user signed in there.
+export function threadUrl(account: string, threadId: string): string {
+  return `https://mail.google.com/mail/?authuser=${encodeURIComponent(account)}#inbox/${threadId}`
 }
 
-export function parseAddressField(html: string): string[] {
-  const result: string[] = []
-  const decoded = decodeHTML(html)
-  // Match all "name" <email> or email only. The leading `,?\s*` and excluding
-  // `,`/`"` from the name keeps the ", " separator before the next recipient
-  // from being swallowed into that recipient's name.
-  const regex = /,?\s*"?([^",<]*?)"?\s*<([^>]+)>/g
-  let match
-  while ((match = regex.exec(decoded))) {
-    if (match[1]) {
-      const name = match[1].trim()
-      const email = match[2]!.trim()
-      if (name === email) {
-        result.push(email)
-      } else {
-        result.push(`${name} <${email}>`)
-      }
+export function parseThreadUrl(url: string): { account: string; threadId: string } | null {
+  try {
+    const u = new URL(url)
+    const account = u.searchParams.get('authuser')
+    const threadId = u.hash.split('/')[1]
+    return account && threadId ? { account, threadId } : null
+  } catch {
+    return null
+  }
+}
+
+function requireThread(url: string) {
+  const info = parseThreadUrl(url)
+  if (!info) throw new Error('not a thread url: ' + url)
+  return info
+}
+
+export function inboxUrl(account: string): string {
+  return `https://mail.google.com/mail/?authuser=${encodeURIComponent(account)}#inbox`
+}
+
+export function composeUrl(account: string, params: Record<string, string> = {}): string {
+  return `https://mail.google.com/mail/?${new URLSearchParams({ authuser: account, view: 'cm', fs: '1', ...params })}`
+}
+
+// --- REST client -----------------------------------------------------------
+
+const API = 'https://gmail.googleapis.com/gmail/v1/users/me'
+
+export class GmailApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message)
+  }
+}
+
+export async function gmailFetch<T>(account: string, path: string, init: RequestInit = {}): Promise<T> {
+  const send = async (token: string) =>
+    fetch(`${API}${path}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...init.headers,
+      },
+    })
+  let resp = await send(await getAccessToken(account))
+  // The stored token can be revoked or expire early; one forced refresh.
+  if (resp.status === 401) {
+    resp = await send(await getAccessToken(account, true))
+  }
+  // Per-user rate limit: back off once.
+  if (resp.status === 429) {
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    resp = await send(await getAccessToken(account))
+  }
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '')
+    throw new GmailApiError(resp.status, `gmail ${init.method ?? 'GET'} ${path}: ${resp.status} ${text.slice(0, 200)}`)
+  }
+  return (resp.status === 204 ? undefined : await resp.json()) as T
+}
+
+// Runs fn over items with at most `limit` in flight; Gmail's per-user quota
+// trips on a burst of 50 parallel thread fetches.
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length)
+  let next = 0
+  async function worker() {
+    while (next < items.length) {
+      const i = next++
+      results[i] = await fn(items[i]!)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return results
+}
+
+// --- Gmail API shapes (only the fields used) --------------------------------
+
+export interface GmailHeader {
+  name: string
+  value: string
+}
+
+export interface GmailPart {
+  partId?: string
+  mimeType: string
+  filename?: string
+  headers?: GmailHeader[]
+  body?: { size: number; data?: string; attachmentId?: string }
+  parts?: GmailPart[]
+}
+
+export interface GmailMessage {
+  id: string
+  threadId: string
+  labelIds?: string[]
+  snippet?: string
+  internalDate: string
+  payload: GmailPart
+}
+
+export interface GmailThread {
+  id: string
+  historyId: string
+  snippet?: string
+  messages: GmailMessage[]
+}
+
+// --- MIME -> ThreadMail ------------------------------------------------------
+
+export function header(part: GmailPart, name: string): string | undefined {
+  const lower = name.toLowerCase()
+  return part.headers?.find((h) => h.name.toLowerCase() === lower)?.value
+}
+
+export function decodeBase64Url(data: string, charset = 'utf-8'): string {
+  const binary = atob(data.replace(/-/g, '+').replace(/_/g, '/'))
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0))
+  try {
+    return new TextDecoder(charset).decode(bytes)
+  } catch {
+    // Unknown charset label.
+    return new TextDecoder().decode(bytes)
+  }
+}
+
+function charsetOf(part: GmailPart): string {
+  return header(part, 'Content-Type')?.match(/charset="?([^";\s]+)/i)?.[1] ?? 'utf-8'
+}
+
+function walk(part: GmailPart, visit: (part: GmailPart) => void) {
+  visit(part)
+  part.parts?.forEach((it) => walk(it, visit))
+}
+
+// "Name" <a@b.c> -> { name, email }; a bare address names itself.
+export function parseMailbox(value: string): { name: string; email: string } {
+  const m = value.match(/^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/)
+  if (m) {
+    const email = m[2]!.trim()
+    return { name: m[1]!.trim() || email, email }
+  }
+  const email = value.trim()
+  return { name: email, email }
+}
+
+// An address header (To, Cc) as display strings: "Name <a@b.c>", or the bare
+// address when there's no name worth showing. Splits only on commas outside
+// quotes and angle brackets - "Doe, Jane" <j@x.com> is one recipient.
+export function parseAddressField(value: string): string[] {
+  const items: string[] = []
+  let current = ''
+  let quoted = false
+  let angled = false
+  for (const c of value) {
+    if (c === '"') quoted = !quoted
+    else if (c === '<' && !quoted) angled = true
+    else if (c === '>' && !quoted) angled = false
+    if (c === ',' && !quoted && !angled) {
+      items.push(current)
+      current = ''
     } else {
-      const email = match[2]!.trim()
-      result.push(email)
+      current += c
     }
   }
-  // If no match found, try to match email directly
-  if (result.length === 0) {
-    const emailRegex = /[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+/g
-    const emails = decoded.match(emailRegex)
-    if (emails) result.push(...emails)
-  }
-  return result
+  items.push(current)
+  return items
+    .filter((it) => it.trim())
+    .map((it) => {
+      const { name, email } = parseMailbox(it)
+      return name === email ? email : `${name} <${email}>`
+    })
 }
 
-export function extractThreadMail(text: string, baseUrl?: string): ThreadMail {
-  const doc = parse(text)
-  // 1. Subject
-  let subject =
-    getTextContent(querySelector('title', doc))?.trim() ||
-    getTextContent(querySelector('.maincontent font[size="+1"] b', doc))?.trim() ||
-    ''
-  if (subject.startsWith('Gmail - ')) {
-    subject = subject.replace('Gmail - ', '')
-  }
+function plainTextToHtml(text: string): string {
+  return `<pre style="white-space: pre-wrap; font-family: inherit; margin: 0">${escapeUTF8(text)}</pre>`
+}
 
-  // 2. Message count
-  const messageCountText = getTextContent(querySelector('.maincontent font[color="#777"]', doc)) || ''
-  const messageCountMatch = messageCountText.match(/(\d+) messages?/)
-  const messageCount = messageCountMatch ? parseInt(messageCountMatch[1]!, 10) : 0
-
-  // 3. CSS extracted from any <style> tags present in the document
+// The body's markup without its document wrapper, the <style> sheets it
+// carried, and its visible text.
+export function prepareHtml(html: string): { contentHtml: string; contentText: string; styles: string[] } {
+  const doc = parse(html)
   const styles = querySelectorAll('style', doc)
     .map((style) => getTextContent(style)?.trim() || '')
     .filter(Boolean)
-
-  // 4. Each email
-  const messageTables = querySelectorAll('table.message', doc)
-  const messages: Message[] = []
-  messageTables.forEach((table) => {
-    // Sender
-    const senderInfo = getTextContent(querySelector('b', table))?.trim() || ''
-    const senderEmailMatch = getInnerHTML(table)?.match(/<b>.*?<\/b>\s*&lt;([^&]+)&gt;/)
-    const senderEmail = senderEmailMatch ? senderEmailMatch[1]!.trim() : ''
-    // Time
-    let time = getTextContent(querySelector('td[align="right"] font[size="-1"]', table)) || ''
-    if (time) {
-      time = formatDate(time)
+  const body = querySelector('body', doc)!
+  querySelectorAll('style, script', body).forEach((node) => {
+    const parent = getParentElement(node)
+    if (parent) parent.childNodes = parent.childNodes.filter((it) => it !== node)
+  })
+  // Background images are painted by the element itself, so the only way
+  // the dark-mode filter can reach them is to mark the element and render
+  // it whole - see liftBackgroundImages.
+  liftBackgroundImages(body)
+  querySelectorAll('img[src]', body).forEach((img) => {
+    if (getAttribute(img, 'height') === '1' && getAttribute(img, 'width') === '1') {
+      return
     }
-    // Recipients/CC/Reply-to
-    const to: string[] = []
-    const cc: string[] = []
-    let replyTo: string | undefined = undefined
-    querySelectorAll('.recipient div', table).forEach((div) => {
-      const html = getInnerHTML(div) || ''
-      if (html.startsWith('To:')) {
-        to.push(...parseAddressField(html.replace('To:', '').trim()))
-      } else if (html.startsWith('Cc:')) {
-        cc.push(...parseAddressField(html.replace('Cc:', '').trim()))
-      } else if (html.startsWith('Reply-To:')) {
-        replyTo = decodeHTML(html.replace('Reply-To:', '').trim())
-      }
-    })
-    // Body
-    const contentDiv = querySelector('div[style*="overflow: hidden"]', table)
-
-    // Attachments (simple implementation: find all a[href] and img[src])
-    const attachments: Attachment[] = []
-    if (contentDiv) {
-      querySelectorAll('a[href]', contentDiv).forEach((a) => {
-        const url = getAttribute(a, 'href')
-        const fileName = getTextContent(a) || url || ''
-        if (url?.match(/\.(pdf|docx?|xlsx?|zip|rar|7z|png|jpg|jpeg|gif|md|txt)(\?|$)/i)) {
-          attachments.push({ fileName, url })
-        }
-      })
-      // Background images are painted by the element itself, so the only way
-      // the dark-mode filter can reach them is to mark the element and render
-      // it whole - see liftBackgroundImages.
-      liftBackgroundImages(contentDiv)
-
-      const images = [...querySelectorAll('img[src]', contentDiv)]
-      images.forEach((img) => {
-        if (getAttribute(img, 'height') === '1' && getAttribute(img, 'width') === '1') {
-          return
-        }
-        if (getAttribute(img, 'src')?.startsWith('http')) {
-          return
-        }
-        // replace image src with baseUrl
-        if (baseUrl) {
-          setAttribute(img, 'src', baseUrl + getAttribute(img, 'src'))
-        }
-        // set container overflow
-        const container = getParentElement(img)
-        if (container) {
-          setAttribute(container, 'style', getAttribute(container, 'style') + '; overflow-x: auto;')
-        }
-      })
+    const container = getParentElement(img)
+    if (container) {
+      setAttribute(container, 'style', (getAttribute(container, 'style') ?? '') + '; overflow-x: auto;')
     }
-    const contentHtml = getInnerHTML(contentDiv)?.trim() || ''
-    const contentText = getTextContent(contentDiv)?.trim() || ''
-    const msg: Message = {
-      senderName: senderInfo,
-      senderEmail,
-      time,
-      to,
-      cc,
-      replyTo,
-      contentHtml,
-      contentText,
-    }
-    if (attachments.length) {
-      msg.attachments = attachments
-    }
-    messages.push(msg)
   })
   return {
-    subject,
-    messageCount,
-    messages,
+    contentHtml: getInnerHTML(body)?.trim() ?? '',
+    contentText: getTextContent(body)?.replace(/\s+/g, ' ').trim() ?? '',
     styles,
+  }
+}
+
+// What a message needs fetched separately: inline images (cid:) whose bytes
+// live behind an attachmentId.
+export interface InlineImage {
+  contentId: string
+  mimeType: string
+  attachmentId?: string
+  data?: string
+}
+
+export function messageToMail(
+  msg: GmailMessage,
+  inlineData: Map<string, string> = new Map(),
+): { message: Message; styles: string[] } {
+  let html: GmailPart | undefined
+  let text: GmailPart | undefined
+  const attachments: Attachment[] = []
+  walk(msg.payload, (part) => {
+    const isAttachment = !!part.filename && (part.body?.attachmentId || part.body?.data)
+    if (isAttachment) {
+      // Inline images are shown in the body, not listed.
+      if (!header(part, 'Content-ID') && part.body?.attachmentId) {
+        attachments.push({
+          fileName: part.filename!,
+          mimeType: part.mimeType,
+          size: part.body.size,
+          messageId: msg.id,
+          attachmentId: part.body.attachmentId,
+        })
+      }
+      return
+    }
+    if (part.mimeType === 'text/html' && !html && part.body?.data) html = part
+    if (part.mimeType === 'text/plain' && !text && part.body?.data) text = part
+  })
+  const decode = (part: GmailPart) => decodeBase64Url(part.body!.data!, charsetOf(part))
+  let body: { contentHtml: string; contentText: string; styles: string[] }
+  if (html) {
+    let source = decode(html)
+    for (const [cid, dataUri] of inlineData) {
+      source = source.replaceAll(`cid:${cid}`, dataUri)
+    }
+    body = prepareHtml(source)
+    if (text) body.contentText = decode(text).trim()
+  } else if (text) {
+    const plain = decode(text)
+    body = { contentHtml: plainTextToHtml(plain), contentText: plain.trim(), styles: [] }
+  } else {
+    body = { contentHtml: '', contentText: decodeHTML(msg.snippet ?? ''), styles: [] }
+  }
+  const from = parseMailbox(header(msg.payload, 'From') ?? '')
+  const message: Message = {
+    senderName: from.name,
+    senderEmail: from.email,
+    time: new Date(Number(msg.internalDate)).toISOString(),
+    to: parseAddressField(header(msg.payload, 'To') ?? ''),
+    cc: parseAddressField(header(msg.payload, 'Cc') ?? ''),
+    replyTo: header(msg.payload, 'Reply-To'),
+    contentHtml: body.contentHtml,
+    contentText: body.contentText,
+  }
+  if (attachments.length) message.attachments = attachments
+  return { message, styles: body.styles }
+}
+
+export function inlineImagesOf(msg: GmailMessage): InlineImage[] {
+  const images: InlineImage[] = []
+  walk(msg.payload, (part) => {
+    const contentId = header(part, 'Content-ID')?.replace(/^<|>$/g, '')
+    if (contentId && part.mimeType.startsWith('image/')) {
+      images.push({ contentId, mimeType: part.mimeType, attachmentId: part.body?.attachmentId, data: part.body?.data })
+    }
+  })
+  return images
+}
+
+// Drafts are part of a thread in the API but never of the conversation shown.
+function visibleMessages(thread: GmailThread): GmailMessage[] {
+  const messages = thread.messages.filter((it) => !it.labelIds?.includes('DRAFT'))
+  return messages.length ? messages : thread.messages
+}
+
+export function threadToFeed(account: string, thread: GmailThread): Feed {
+  const messages = visibleMessages(thread)
+  const first = messages[0]!
+  const last = messages.at(-1)!
+  return {
+    title: header(first.payload, 'Subject') ?? '',
+    summary: decodeHTML(last.snippet ?? thread.snippet ?? ''),
+    url: threadUrl(account, thread.id),
+    modified: new Date(Number(last.internalDate)).toISOString(),
+    author: parseMailbox(header(last.payload, 'From') ?? ''),
+  }
+}
+
+export function threadToMail(thread: GmailThread, inlineData: Map<string, string> = new Map()): ThreadMail {
+  const messages = visibleMessages(thread)
+  const built = messages.map((msg) => messageToMail(msg, inlineData))
+  return {
+    subject: header(messages[0]!.payload, 'Subject') ?? '',
+    messageCount: messages.length,
+    messages: built.map((it) => it.message),
+    styles: [...new Set(built.flatMap((it) => it.styles))],
     extractVersion: CURRENT_EXTRACT_VERSION,
   }
 }
 
-// https://mail.google.com/mail/u/0/?ui=2&view=pt&search=all&th=19735160ecf4ec0f
-export async function getThreadMail(url: string) {
-  const u = new URL(url)
-  const baseUrl = u.origin + u.pathname
-  const messageId = u.searchParams.get('message_id')
-  const resp = await fetch(`${baseUrl}/?ui=2&view=pt&search=all&th=${messageId}`, { credentials: 'include' })
-  const text = await resp.text()
-  return extractThreadMail(text, baseUrl)
-}
+// Inline images bigger than this stay broken rather than bloat storage.
+const MAX_INLINE_IMAGE_BYTES = 1_000_000
 
-// Safari doesn't search across cookie stores by default the way Chrome/Firefox
-// do - a plain cookies.get() silently misses the cookie unless storeId is
-// given explicitly, so fall back to checking every store when the direct
-// lookup comes up empty.
-async function getCookie(name: string, url: string): Promise<string | undefined> {
-  const cookie = await browser.cookies.get({ url, name })
-  if (cookie) {
-    return cookie.value
-  }
-  const stores = await browser.cookies.getAllCookieStores()
-  for (const store of stores) {
-    const storeCookie = await browser.cookies.get({ url, name, storeId: store.id })
-    if (storeCookie) {
-      return storeCookie.value
-    }
-  }
-  return undefined
-}
-
-export async function getGmailAt(n: string) {
-  return getCookie('GMAIL_AT', `https://mail.google.com/mail/u/${n}`)
-}
-
-// "Logged in" means any signed-in account, not specifically slot 0's -
-// GMAIL_AT is path-scoped per slot (/mail/u/{n}), so probe each. Slots are
-// assigned contiguously but sign-outs can leave gaps in the cookies, so scan
-// a fixed small range rather than stopping at the first miss.
-const MAX_ACCOUNT_SLOTS = 10
-export async function checkLoginStatus() {
-  for (let i = 0; i < MAX_ACCOUNT_SLOTS; i++) {
-    if (await getGmailAt(String(i))) {
-      return true
-    }
-  }
-  return false
-}
-
-export function extractGmailInfo(url: string) {
-  // For example: https://mail.google.com/mail/u/0?account_id=xxx&message_id=xxxx&view=conv&extsrc=atom
-  const m = url.match(/u\/(?<n>\d+).*message_id=(?<thread>[^&]+)/)
-  if (m && m.groups) {
-    return { n: m.groups.n!, thread: m.groups.thread! }
-  }
-  // Compatible with u=0 format
-  const n = url.match(/u[=\/](\d+)/)?.[1] || '0'
-  const thread = url.match(/message_id=([^&]+)/)?.[1]
-  if (n && thread) return { n, thread }
-  return null
-}
-
-// IK/AT cache
-const ikCache = new Map<string, string>()
-
-export async function getIk(n: string): Promise<string | null> {
-  if (ikCache.has(n)) {
-    return ikCache.get(n)!
-  }
-  const page =
-    (await browser.storage.local.get<Record<string, string>>('page-' + n))['page-' + n] ||
-    `https://mail.google.com/mail/u/${n}/s/`
-  async function next(href: string): Promise<string | null> {
-    const r = await fetch(href, { credentials: 'include' })
-    if (r.ok) {
-      const content = await r.text()
-      const m = content.match(/ID_KEY\s*=\s*['"](?<ik>[^'"]*)['"]/)
-      if (m && m.groups && m.groups.ik) {
-        ikCache.set(n, m.groups.ik)
-        return m.groups.ik
+async function fetchInlineData(account: string, thread: GmailThread): Promise<Map<string, string>> {
+  const data = new Map<string, string>()
+  for (const msg of visibleMessages(thread)) {
+    for (const image of inlineImagesOf(msg)) {
+      let b64 = image.data
+      if (!b64 && image.attachmentId) {
+        const att = await gmailFetch<{ size: number; data: string }>(
+          account,
+          `/messages/${msg.id}/attachments/${image.attachmentId}`,
+        ).catch((err) => {
+          void debugLog('inline image failed ->', image.contentId, err)
+          return null
+        })
+        if (!att || att.size > MAX_INLINE_IMAGE_BYTES) continue
+        b64 = att.data
       }
-      const doc = parse(content)
-      const meta = querySelector('meta[http-equiv="refresh"]', doc)
-      if (meta) {
-        const url = getAttribute(meta, 'content')?.split('url=')[1]
-        if (url) {
-          const o = new URL(url, page)
-          await browser.storage.local.set({ ['page-' + n]: o.href })
-          return next(o.href)
-        }
+      if (b64) {
+        data.set(image.contentId, `data:${image.mimeType};base64,${b64.replace(/-/g, '+').replace(/_/g, '/')}`)
       }
     }
-    throw Error('core.js -> id_key')
   }
-  return next(page)
+  return data
 }
 
-// What Gmail's /sync write API checks besides the session cookies, scraped
-// from the Gmail page. The old /mail/u/N/s/?v=or endpoint answers every
-// action with a redirect to its re-auth page, in any browser.
-interface SyncSession {
-  xsrf: string
-  btai: string
-}
-const syncSessionCache = new Map<string, Promise<SyncSession>>()
+// --- Polling ---------------------------------------------------------------
 
-export function parseSyncSession(html: string): SyncSession {
-  const fields = {
-    xsrf: html.match(/"([\w-]{20,}:\d{13})"/)?.[1],
-    ik: html.match(/GM_ID_KEY\s*=\s*'([^']+)'/)?.[1],
-    build: html.match(/"(gmail\.[\w-]+_\d{8}\.\d+_p\d+)"/)?.[1],
-    globalsId: html.match(/var GLOBALS=\[null,null,(\d+)/)?.[1],
+interface CachedThread {
+  historyId: string
+  feed: Feed
+  mail: ThreadMail
+}
+
+interface InboxCache {
+  // The mailbox's historyId when this was built: unchanged means nothing in
+  // the mailbox changed, so the poll needs no further requests.
+  historyId: string
+  threads: Record<string, CachedThread>
+  order: string[]
+}
+
+// Persisted because the background is suspended between polls: an in-memory
+// cache would be empty on nearly every wake-up and re-download the inbox.
+const inboxCacheKey = (account: string) => `inbox:${account}`
+
+async function readInboxCache(account: string): Promise<InboxCache | null> {
+  const key = inboxCacheKey(account)
+  const { [key]: cache } = await browser.storage.local.get<Record<string, InboxCache>>(key)
+  return cache ?? null
+}
+
+async function writeInboxCache(account: string, cache: InboxCache) {
+  await browser.storage.local.set({ [inboxCacheKey(account)]: cache })
+}
+
+export async function clearInboxCache(account: string) {
+  await browser.storage.local.remove(inboxCacheKey(account))
+}
+
+const MAX_THREADS = 50
+
+async function fetchThread(account: string, id: string): Promise<GmailThread> {
+  return gmailFetch<GmailThread>(account, `/threads/${id}?format=full`)
+}
+
+async function buildCachedThread(account: string, thread: GmailThread): Promise<CachedThread> {
+  return {
+    historyId: thread.historyId,
+    feed: threadToFeed(account, thread),
+    mail: threadToMail(thread, await fetchInlineData(account, thread)),
   }
-  const missing = Object.keys(fields).filter((k) => !fields[k as keyof typeof fields])
-  if (missing.length) {
-    throw new Error(`sync session: page has no ${missing.join(', ')}`)
+}
+
+export async function getInbox(account: string): Promise<RSSInfo> {
+  const profile = await gmailFetch<{ historyId: string }>(account, '/profile')
+  const cache = await readInboxCache(account)
+  const cacheUsable = cache?.order.every((id) => cache.threads[id]?.mail.extractVersion === CURRENT_EXTRACT_VERSION)
+  if (cache && cacheUsable && cache.historyId === profile.historyId) {
+    return { email: account, feeds: cache.order.map((id) => cache.threads[id]!.feed) }
   }
-  // X-Gmail-BTAI, the web app's description of itself; without it every write
-  // is a 500. Positions copied from a captured request, minus its feature
-  // flags (index 2) and history counters, which Gmail doesn't need.
-  const btai = [null, null, null, null, fields.ik, null, 25, fields.build, 1, 5, '',
-    -new Date().getTimezoneOffset() * 60_000, Intl.DateTimeFormat().resolvedOptions().timeZone,
-    null, null, Number(fields.globalsId), '', '', null, null, null]
-  return { xsrf: fields.xsrf!, btai: JSON.stringify(btai) }
-}
-
-// The promise is cached, so a bulk action's parallel calls share one page fetch.
-function getSyncSession(n: string, fresh = false): Promise<SyncSession> {
-  const cached = syncSessionCache.get(n)
-  if (cached && !fresh) {
-    return cached
+  const list = await gmailFetch<{ threads?: { id: string; historyId: string }[] }>(
+    account,
+    `/threads?labelIds=INBOX&labelIds=UNREAD&maxResults=${MAX_THREADS}`,
+  )
+  const listed = list.threads ?? []
+  const entries = await mapLimit(listed, 5, async ({ id, historyId }) => {
+    const cached = cache?.threads[id]
+    if (cached && cached.historyId === historyId && cached.mail.extractVersion === CURRENT_EXTRACT_VERSION) {
+      return [id, cached] as const
+    }
+    return [id, await buildCachedThread(account, await fetchThread(account, id))] as const
+  })
+  const next: InboxCache = {
+    historyId: profile.historyId,
+    threads: Object.fromEntries(entries),
+    order: listed.map((it) => it.id),
   }
-  const session = (async () => {
-    const resp = await fetch(`https://mail.google.com/mail/u/${n}/`, { credentials: 'include' })
-    if (!resp.ok) throw new Error(`sync session: page returned ${resp.status}`)
-    return parseSyncSession(await resp.text())
-  })()
-  syncSessionCache.set(n, session)
-  session.catch(() => syncSessionCache.delete(n))
-  return session
+  await writeInboxCache(account, next)
+  return { email: account, feeds: next.order.map((id) => next.threads[id]!.feed) }
 }
 
-// Gmail's system labels; ^us is removed together with ^u by Gmail itself.
-const LABEL_CHANGES: Record<string, [add: string[] | null, remove: string[] | null]> = {
-  rd: [null, ['^u', '^us']],
-  ur: [['^u'], null],
-  'rc_^i': [null, ['^i']],
-  sp: [['^s'], ['^i']],
-  tr: [['^k'], ['^i']],
-  st: [['^t'], null],
-  xst: [null, ['^t']],
+export async function checkLoginStatus(): Promise<boolean> {
+  return (await getAccounts()).some((it) => !it.needsReauth)
 }
 
-// The label-change write Gmail's web app sends, reduced to what it needs.
-// The feed's hex thread id, in decimal, also names the thread's first message.
-export function syncLabelBody(thread: string, add: string[] | null, remove: string[] | null) {
-  const id = BigInt('0x' + thread).toString()
-  const now = Date.now()
-  return JSON.stringify([
-    null,
-    [[[1, [`thread-f:${id}`, [null, null, null, null, null, null, [add, remove, [`msg-f:${id}`]]]]]]],
-    [1, null, null, null, [null, 0], null, 1],
-    [now, 1, now, 0, 82],
-    2,
-  ])
+// Every signed-in account's unread inbox, in the order they were added.
+// Promise.all, not allSettled: any account failing aborts the whole poll and
+// leaves the previous state untouched, rather than treating it as gone. An
+// account waiting for a fresh sign-in is left out instead - its mail can't be
+// read until then.
+export async function getAllRSS(): Promise<RSSInfo[]> {
+  const accounts = (await getAccounts()).filter((it) => !it.needsReauth)
+  if (accounts.length === 0) {
+    throw new Error('getAllRSS: no signed-in account')
+  }
+  return Promise.all(accounts.map((it) => getInbox(it.email)))
 }
 
-function postSync(n: string, body: string, session: SyncSession) {
-  return fetch(`https://mail.google.com/sync/u/${n}/i/s?hl=en&c=1&rt=r&pt=ji`, {
+export async function getThreadMail(url: string): Promise<ThreadMail> {
+  const { account, threadId } = requireThread(url)
+  const cached = (await readInboxCache(account))?.threads[threadId]
+  if (cached?.mail.extractVersion === CURRENT_EXTRACT_VERSION) {
+    return cached.mail
+  }
+  return (await buildCachedThread(account, await fetchThread(account, threadId))).mail
+}
+
+// --- Actions ---------------------------------------------------------------
+
+async function modifyLabels(url: string, add: string[], remove: string[]) {
+  const { account, threadId } = requireThread(url)
+  await gmailFetch(account, `/threads/${threadId}/modify`, {
     method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Framework-Xsrf-Token': session.xsrf,
-      'X-Gmail-BTAI': session.btai,
-    },
-    body,
+    body: JSON.stringify({ addLabelIds: add, removeLabelIds: remove }),
   })
 }
 
-// Email operation related
-async function gmailAction({ url, cmd, prefs = {} }: { url: string; cmd: string; prefs?: Record<string, any> }) {
-  const info = extractGmailInfo(url)
-  if (!info) throw Error('no_links')
-  const { n, thread } = info
-  const change = LABEL_CHANGES[cmd]
-  if (!change) throw Error('action_not_supported: ' + cmd)
-  if (cmd === 'rc_^i' && prefs.doReadOnArchive) {
-    await gmailAction({ url, cmd: 'rd', prefs })
-  }
-  const body = syncLabelBody(thread, ...change)
-  let resp = await postSync(n, body, await getSyncSession(n))
-  if (!resp.ok) {
-    // The page's token expires; retry once with a freshly scraped one.
-    resp = await postSync(n, body, await getSyncSession(n, true))
-  }
-  // A rejected action must surface, or the mail vanishes from the list and
-  // silently comes back on the next poll.
-  if (!resp.ok) {
-    await debugLog('gmailAction: rejected ->', { cmd, slot: n, status: resp.status, body: (await resp.text()).slice(0, 200) })
-    throw new Error(`gmailAction ${cmd}: ${resp.status}`)
-  }
-}
-
-export async function archiveMail(url: string, prefs?: Record<string, any>) {
-  return gmailAction({ url, cmd: 'rc_^i', prefs })
-}
-
 export async function markAsRead(url: string) {
-  await gmailAction({ url, cmd: 'rd' })
+  await modifyLabels(url, [], ['UNREAD'])
 }
 
 export async function markAsUnread(url: string) {
-  return gmailAction({ url, cmd: 'ur' })
+  await modifyLabels(url, ['UNREAD'], [])
+}
+
+export async function archiveMail(url: string) {
+  await modifyLabels(url, [], ['INBOX'])
 }
 
 export async function markAsSpam(url: string) {
-  return gmailAction({ url, cmd: 'sp' })
+  await modifyLabels(url, ['SPAM'], ['INBOX'])
 }
 
+// Moves to Trash (recoverable for 30 days), like Gmail's delete button.
 export async function deleteMail(url: string) {
-  return gmailAction({ url, cmd: 'tr' })
+  const { account, threadId } = requireThread(url)
+  await gmailFetch(account, `/threads/${threadId}/trash`, { method: 'POST' })
 }
 
-export async function starMail(url: string) {
-  return gmailAction({ url, cmd: 'st' })
+// The newest message's headers as an RFC 822 header block, which is all
+// planUnsubscribe reads from the raw source.
+export async function getRawMessage(url: string): Promise<string> {
+  const { account, threadId } = requireThread(url)
+  const thread = await gmailFetch<GmailThread>(
+    account,
+    `/threads/${threadId}?format=metadata&metadataHeaders=List-Unsubscribe&metadataHeaders=List-Unsubscribe-Post`,
+  )
+  const last = visibleMessages(thread).at(-1)
+  return (last?.payload.headers ?? []).map((h) => `${h.name}: ${h.value}`).join('\r\n') + '\r\n\r\n'
 }
 
-export async function unstarMail(url: string) {
-  return gmailAction({ url, cmd: 'xst' })
+export async function getAttachmentBlob(account: string, attachment: Attachment): Promise<Blob> {
+  const { data } = await gmailFetch<{ data: string }>(
+    account,
+    `/messages/${attachment.messageId}/attachments/${attachment.attachmentId}`,
+  )
+  const binary = atob(data.replace(/-/g, '+').replace(/_/g, '/'))
+  return new Blob([Uint8Array.from(binary, (c) => c.charCodeAt(0))], { type: attachment.mimeType })
 }
 
-export function getOpenWebLink(url: string) {
-  const u = new URL(url)
-  const messageId = u.searchParams.get('message_id')
-  if (!messageId) {
-    return url
-  }
-  const baseUrl = u.origin + u.pathname
-  return `${baseUrl}/#inbox/${messageId}`
-}
+// --- Opening Gmail ---------------------------------------------------------
 
+// Thread and inbox urls are already Gmail links.
 export async function openMailInWeb(url: string) {
-  const openWebLink = getOpenWebLink(url)
-  const tabs = await browser.tabs.query({ url: 'https://mail.google.com/*' })
-  // Prefer a tab already on the same account slot - reusing whichever Gmail
-  // tab happens to be first would hijack a different account's tab when
-  // several are signed in. No same-slot tab -> a fresh one, not a takeover.
-  const slot = parseAccountSlot(openWebLink)
-  const target = slot === null ? tabs[0] : tabs.find((tab) => tab.url && parseAccountSlot(tab.url) === slot)
-  if (!target) {
-    await browser.tabs.create({ url: openWebLink })
-    return
-  }
-  await browser.tabs.update(target.id!, { url: openWebLink, active: true })
-  await browser.windows.update(target.windowId!, { focused: true })
+  await browser.tabs.create({ url })
 }
 
-// The inbox of whichever account the user is currently using in Gmail.
+// The first account's inbox - the one the user added first.
 export async function getActiveInboxUrl() {
-  return `https://mail.google.com/mail/u/${await detectActiveSlot()}/#inbox`
+  const [account] = await getAccounts()
+  return account ? inboxUrl(account.email) : 'https://mail.google.com/mail/'
 }
 
 export async function newEmail() {
+  const [account] = await getAccounts()
   const currentWindow = await browser.windows.getCurrent()
   const windowWidth = 800
   const windowHeight = 600
@@ -694,7 +610,7 @@ export async function newEmail() {
   }
 
   await browser.windows.create({
-    url: `https://mail.google.com/mail/u/${await detectActiveSlot()}/?fs=1&tf=cm`,
+    url: account ? composeUrl(account.email) : 'https://mail.google.com/mail/?view=cm&fs=1',
     type: 'popup',
     width: windowWidth,
     height: windowHeight,
@@ -702,46 +618,4 @@ export async function newEmail() {
     top,
     focused: true,
   })
-}
-
-export function parseReplyTo(
-  thread: ThreadMail,
-  me: string,
-):
-  | {
-      email: string
-      name?: string
-    }
-  | undefined {
-  const to = thread.messages.find((it) => it.senderEmail !== me)
-  if (!to) {
-    return
-  }
-  return {
-    email: to.senderEmail,
-    name: to.senderName,
-  }
-}
-
-// The message's full RFC 822 source - Gmail's "Show original" - which is
-// the only place headers such as List-Unsubscribe are visible.
-export async function getRawMessage(url: string): Promise<string> {
-  const info = extractGmailInfo(url)
-  if (!info) throw Error('no_links')
-  const ik = await getIk(info.n)
-  if (!ik) throw Error('getRawMessage: no ik')
-  const resp = await fetch(
-    `https://mail.google.com/mail/u/${info.n}/?ui=2&ik=${ik}&view=om&th=${info.thread}`,
-    { credentials: 'include' },
-  )
-  if (!resp.ok) {
-    throw new Error(`getRawMessage: ${resp.status}`)
-  }
-  return extractRawSource(await resp.text())
-}
-
-// "Show original" is an HTML page; the source sits HTML-escaped in a <pre>.
-export function extractRawSource(page: string): string {
-  const pre = page.match(/<pre[^>]*id="raw_message_text"[^>]*>([\s\S]*?)<\/pre>/)
-  return pre ? decodeHTML(pre[1]!) : page
 }
