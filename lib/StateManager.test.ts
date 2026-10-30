@@ -489,6 +489,51 @@ describe('StateManager', () => {
     })
   })
 
+  describe('an account that fails to load', () => {
+    it('keeps its threads as they were, without notifying them again', async () => {
+      api.checkLoginStatus.mockImplementation(async () => true)
+      api.getThreadMail.mockImplementation(async () => THREAD_DETAILS)
+      const bFeed = { ...feed, url: 'https://mail.google.com/mail/?authuser=b@test.com#inbox/b1' }
+      api.getAllRSS.mockImplementation(
+        async () =>
+          [
+            { email: 'a@test.com', feeds: [feed] },
+            { email: 'b@test.com', feeds: [bFeed] },
+          ] satisfies RSSInfo[],
+      )
+      const stateManager = new StateManager(api)
+      await stateManager.fetchThreads()
+
+      api.getAllRSS.mockImplementation(
+        async () =>
+          [
+            { email: 'a@test.com', feeds: [feed] },
+            { email: 'b@test.com', feeds: [], failed: true },
+          ] satisfies RSSInfo[],
+      )
+      await stateManager.fetchThreads()
+      expect(stateManager.accounts).toEqual(['a@test.com', 'b@test.com'])
+      expect(stateManager.threads.map((it) => it.url)).toEqual([feed.url, bFeed.url])
+      expect(stateManager.getNewThreads()).toEqual([])
+    })
+  })
+
+  describe('after a restart', () => {
+    it('keeps the stored threads instead of fetching their mail again', async () => {
+      api.checkLoginStatus.mockImplementation(async () => true)
+      api.getThreadMail.mockImplementation(async () => THREAD_DETAILS)
+      api.getAllRSS.mockImplementation(async () => [{ email: 'a@test.com', feeds: [feed] }] satisfies RSSInfo[])
+      await new StateManager(api).fetchThreads()
+      expect(api.getThreadMail).toHaveBeenCalledOnce()
+
+      const afterRestart = new StateManager(api)
+      void afterRestart.restore()
+      await afterRestart.fetchThreads()
+      expect(afterRestart.threads.map((it) => it.url)).toEqual([feed.url])
+      expect(api.getThreadMail).toHaveBeenCalledOnce()
+    })
+  })
+
   describe('concurrent actions during an in-flight fetch', () => {
     async function seedOneThread(stateManager: StateManager) {
       api.checkLoginStatus.mockImplementation(async () => true)

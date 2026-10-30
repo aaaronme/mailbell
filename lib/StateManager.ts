@@ -87,13 +87,22 @@ export class StateManager {
   // re-notified repeatedly until it's actually read, not just once.
   // The background doesn't await this before registering its listeners, so
   // everything that reads or writes notifiedEmails waits on it instead.
+  //
+  // It restores the threads too: their mail is stored only there (the inbox
+  // cache keeps just the list), so a fresh worker keeps every unchanged thread
+  // instead of downloading it again.
   private restored: Promise<void> = Promise.resolve()
   restore() {
-    this.restored = browser.storage.local.get(['notifiedEmails']).then(({ notifiedEmails }) => {
-      if (Array.isArray(notifiedEmails)) {
-        this.notifiedEmails = new Set(notifiedEmails)
-      }
-    })
+    this.restored = browser.storage.local
+      .get<{ notifiedEmails?: string[]; threads?: EmailThread[] }>(['notifiedEmails', 'threads'])
+      .then(({ notifiedEmails, threads }) => {
+        if (Array.isArray(notifiedEmails)) {
+          this.notifiedEmails = new Set(notifiedEmails)
+        }
+        if (Array.isArray(threads)) {
+          this.threads = threads
+        }
+      })
     return this.restored
   }
 
@@ -126,13 +135,17 @@ export class StateManager {
         rssList.map((rss) => ({ email: rss.email, feedCount: rss.feeds.length })),
       )
       this.accounts = rssList.map((rss) => rss.email)
+      // An account whose inbox couldn't be read this time keeps what it had,
+      // untouched, rather than looking empty.
+      const failed = new Set(rssList.filter((rss) => rss.failed).map((rss) => rss.email))
       // Thread URLs carry the account (authuser), so one merged
       // list never confuses two accounts' threads. Feed entries are tagged
       // with their account here so the popup can label them.
       const feeds = rssList.flatMap((rss) => rss.feeds.map((it) => ({ ...it, account: rss.email })))
-      // getAllRSS is all-or-nothing, so this is every account's full feed.
+      // Every readable account's full feed.
       const feedUrls = new Set(feeds.map((it) => it.url))
-      this.notifiedEmails = new Set([...this.notifiedEmails].filter((url) => feedUrls.has(url)))
+      const failedUrls = new Set(this.threads.filter((t) => failed.has(t.account)).map((t) => t.url))
+      this.notifiedEmails = new Set([...this.notifiedEmails].filter((url) => feedUrls.has(url) || failedUrls.has(url)))
       // Assembled in locals and written to this.threads only once complete:
       // the getThreadMail() calls below take hundreds of ms, and any action
       // arriving in that window calls notify(), which persists this.threads
@@ -157,15 +170,9 @@ export class StateManager {
               // existed (undefined !== any version), is dropped - and it means a
               // future version bump needs no migration code.
               //
-              // What it does *not* do today, which is what the comment this
-              // replaces got wrong: `threads` starts empty in every service
-              // worker and restore() only reads notifiedEmails, so this filter
-              // never sees a thread a previous run persisted. After an extension
-              // update the stale cache is refreshed by the ordinary full
-              // re-fetch a fresh worker performs on startup
-              // (entrypoints/background.ts), not by this clause; in practice the
-              // clause only ever sees threads this build produced in this run. It
-              // is the invariant, not the refresh mechanism.
+              // restore() brings back the threads a previous run persisted, so
+              // after an extension update this is what drops the ones an older
+              // version extracted; they're fetched again as new feed entries.
               //
               // Residual, reachable window: the popup reads threads straight out
               // of storage.local (lib/useMailQuery.ts), so between an update and
@@ -182,8 +189,9 @@ export class StateManager {
               t.extractVersion === CURRENT_EXTRACT_VERSION &&
               // A signed-out account's threads go, viewed or not.
               this.accounts.includes(t.account) &&
-              // Keep read emails
+              // Keep read emails, and a failed account's as they were
               (this.viewedEmails.has(t.url) ||
+                failed.has(t.account) ||
                 // Keep unchanged emails
                 feeds.find((it) => it.url === t.url)?.modified === t.modified),
           )
@@ -223,6 +231,7 @@ export class StateManager {
     }
   }
   async clearViewed() {
+    await this.restored
     this.threads = this.threads.filter((t) => !this.viewedEmails.has(t.url))
     this.viewedEmails.clear()
     await this.notify()
@@ -232,6 +241,7 @@ export class StateManager {
     await this.removeAll([url], (u) => this.api.markAsRead(u))
   }
   async markAsUnread(url: string) {
+    await this.restored
     this.viewedEmails.delete(url)
     this.api.markAsUnread(url).catch((err) => {
       void debugLog('markAsUnread: failed ->', err)
@@ -240,6 +250,7 @@ export class StateManager {
     await this.notify()
   }
   async viewed(url: string) {
+    await this.restored
     this.viewedEmails.add(url)
     this.api.markAsRead(url).catch((err) => {
       void debugLog('viewed: failed ->', err)
@@ -257,6 +268,7 @@ export class StateManager {
     await this.removeAll(urls, (url) => this.api.delete(url))
   }
   private async removeAll(urls: string[], action: (url: string) => Promise<void>) {
+    await this.restored
     this.threads = this.threads.filter((t) => !urls.includes(t.url))
     Promise.allSettled(urls.map(action)).then((results) => {
       // Some calls failed: refetch so those threads come back instead of

@@ -35,6 +35,8 @@ export interface Feed {
 export interface RSSInfo {
   email: string
   feeds: Feed[]
+  // The inbox couldn't be read this time (feeds is empty): keep what it had.
+  failed?: boolean
 }
 
 export interface Attachment {
@@ -454,10 +456,11 @@ async function fetchInlineData(account: string, thread: GmailThread): Promise<Ma
 interface CachedThread {
   historyId: string
   feed: Feed
-  mail: ThreadMail
 }
 
 interface InboxCache {
+  // Bumped when the shape changes; a cache of another version is rebuilt.
+  version: number
   // The mailbox's historyId when this was built: unchanged means nothing in
   // the mailbox changed, so the poll needs no further requests.
   historyId: string
@@ -465,21 +468,30 @@ interface InboxCache {
   order: string[]
 }
 
+// Version 2: the list only. The mail itself is persisted once, with the
+// threads StateManager stores.
+const INBOX_CACHE_VERSION = 2
+
 // Persisted because the background is suspended between polls: an in-memory
-// cache would be empty on nearly every wake-up and re-download the inbox.
+// cache would be empty on nearly every wake-up and re-list the inbox.
 const inboxCacheKey = (account: string) => `inbox:${account}`
 
 // Mirrored in memory for the life of the background: a fresh one reads each
 // account's cache once instead of once per thread it builds.
 const inboxCaches = new Map<string, InboxCache>()
 
+// Mail built while listing the inbox (the same request gives both), held
+// until StateManager asks for it with getThreadMail - not persisted.
+const builtMail = new Map<string, ThreadMail>()
+
 async function readInboxCache(account: string): Promise<InboxCache | null> {
   const memo = inboxCaches.get(account)
   if (memo) return memo
   const key = inboxCacheKey(account)
   const { [key]: cache } = await browser.storage.local.get<Record<string, InboxCache>>(key)
-  if (cache) inboxCaches.set(account, cache)
-  return cache ?? null
+  if (cache?.version !== INBOX_CACHE_VERSION) return null
+  inboxCaches.set(account, cache)
+  return cache
 }
 
 async function writeInboxCache(account: string, cache: InboxCache) {
@@ -501,9 +513,8 @@ async function fetchThread(account: string, id: string): Promise<GmailThread> {
   return gmailFetch<GmailThread>(account, `/threads/${id}?format=full`)
 }
 
-async function buildCachedThread(account: string, thread: GmailThread): Promise<CachedThread> {
+async function buildThread(account: string, thread: GmailThread): Promise<{ feed: Feed; mail: ThreadMail }> {
   return {
-    historyId: thread.historyId,
     feed: threadToFeed(account, thread),
     mail: threadToMail(thread, await fetchInlineData(account, thread)),
   }
@@ -512,8 +523,7 @@ async function buildCachedThread(account: string, thread: GmailThread): Promise<
 async function getInbox(account: string): Promise<RSSInfo> {
   const profile = await gmailFetch<{ historyId: string }>(account, '/profile')
   const cache = await readInboxCache(account)
-  const cacheUsable = cache?.order.every((id) => cache.threads[id]?.mail.extractVersion === CURRENT_EXTRACT_VERSION)
-  if (cache && cacheUsable && cache.historyId === profile.historyId) {
+  if (cache && cache.historyId === profile.historyId) {
     return { email: account, feeds: cache.order.map((id) => cache.threads[id]!.feed) }
   }
   const list = await gmailFetch<{ threads?: { id: string; historyId: string }[] }>(
@@ -523,12 +533,13 @@ async function getInbox(account: string): Promise<RSSInfo> {
   const listed = list.threads ?? []
   const entries = await mapLimit(listed, 5, async ({ id, historyId }) => {
     const cached = cache?.threads[id]
-    if (cached && cached.historyId === historyId && cached.mail.extractVersion === CURRENT_EXTRACT_VERSION) {
-      return [id, cached] as const
-    }
-    return [id, await buildCachedThread(account, await fetchThread(account, id))] as const
+    if (cached && cached.historyId === historyId) return [id, cached] as const
+    const { feed, mail } = await buildThread(account, await fetchThread(account, id))
+    builtMail.set(feed.url, mail)
+    return [id, { historyId, feed }] as const
   })
   const next: InboxCache = {
+    version: INBOX_CACHE_VERSION,
     historyId: profile.historyId,
     threads: Object.fromEntries(entries),
     order: listed.map((it) => it.id),
@@ -541,26 +552,36 @@ export async function checkLoginStatus(): Promise<boolean> {
   return (await getAccounts()).some((it) => !it.needsReauth)
 }
 
-// Every signed-in account's unread inbox, in the order they were added.
-// Promise.all, not allSettled: any account failing aborts the whole poll and
-// leaves the previous state untouched, rather than treating it as gone. An
-// account waiting for a fresh sign-in is left out instead - its mail can't be
-// read until then.
+// Every signed-in account's unread inbox, in the order they were added. One
+// account failing (a network blip, a Gmail error) is marked failed, so the
+// others still update and its mail stays as it was; only all of them failing
+// fails the poll. An account waiting for a fresh sign-in is left out - its
+// mail can't be read until then.
 export async function getAllRSS(): Promise<RSSInfo[]> {
   const accounts = (await getAccounts()).filter((it) => !it.needsReauth)
   if (accounts.length === 0) {
     throw new Error('getAllRSS: no signed-in account')
   }
-  return Promise.all(accounts.map((it) => getInbox(it.email)))
+  // Whatever the last poll built and StateManager didn't need (a thread it
+  // kept) goes, so this never grows.
+  builtMail.clear()
+  const results = await Promise.allSettled(accounts.map((it) => getInbox(it.email)))
+  if (results.every((it) => it.status === 'rejected')) throw results[0]!.reason
+  return results.map((result, i) => {
+    if (result.status === 'fulfilled') return result.value
+    void debugLog('getAllRSS: account failed ->', accounts[i]!.email, String(result.reason))
+    return { email: accounts[i]!.email, feeds: [], failed: true }
+  })
 }
 
 export async function getThreadMail(url: string): Promise<ThreadMail> {
-  const { account, threadId } = requireThread(url)
-  const cached = (await readInboxCache(account))?.threads[threadId]
-  if (cached?.mail.extractVersion === CURRENT_EXTRACT_VERSION) {
-    return cached.mail
+  const built = builtMail.get(url)
+  if (built) {
+    builtMail.delete(url)
+    return built
   }
-  return (await buildCachedThread(account, await fetchThread(account, threadId))).mail
+  const { account, threadId } = requireThread(url)
+  return (await buildThread(account, await fetchThread(account, threadId))).mail
 }
 
 // --- Actions ---------------------------------------------------------------

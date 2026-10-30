@@ -236,8 +236,14 @@ describe('Gmail API calls', () => {
     expect(inbox!.feeds.map((it) => it.url)).toEqual([threadUrl(ACCOUNT, 't1')])
     expect(calledPaths()).toEqual(['/profile', '/threads', '/threads/t1'])
     expect(fetchMock.mock.calls[0]![1].headers.Authorization).toBe('Bearer a')
-
+    // The mail built while listing is handed over without another request,
+    // and only the list is persisted - the mail is stored with the threads.
     fetchMock.mockClear()
+    expect((await getThreadMail(threadUrl(ACCOUNT, 't1'))).messages[0]!.contentText).toBe('one')
+    expect(fetchMock).not.toHaveBeenCalled()
+    const { [`inbox:${ACCOUNT}`]: stored } = await fakeBrowser.storage.local.get(`inbox:${ACCOUNT}`)
+    expect(JSON.stringify(stored)).not.toContain('contentHtml')
+
     await getAllRSS()
     expect(calledPaths()).toEqual(['/profile'])
 
@@ -246,10 +252,26 @@ describe('Gmail API calls', () => {
     mailboxHistory = '501'
     await getAllRSS()
     expect(calledPaths()).toEqual(['/profile', '/threads'])
+  })
 
-    fetchMock.mockClear()
-    expect((await getThreadMail(threadUrl(ACCOUNT, 't1'))).messages[0]!.contentText).toBe('one')
-    expect(fetchMock).not.toHaveBeenCalled()
+  it('marks one failing account failed instead of failing the poll', async () => {
+    await fakeBrowser.storage.local.set({
+      oauthAccounts: [
+        { email: ACCOUNT, refreshToken: 'r', accessToken: 'a', expiresAt: Date.now() + 3600_000 },
+        { email: 'down@gmail.com', refreshToken: 'r', accessToken: 'down', expiresAt: Date.now() + 3600_000 },
+      ],
+    })
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) =>
+      (init?.headers as Record<string, string>).Authorization === 'Bearer down'
+        ? new Response('backend error', { status: 503 })
+        : Response.json(routes(url, init)),
+    )
+    const [ok, down] = await getAllRSS()
+    expect(ok).toMatchObject({ email: ACCOUNT, feeds: [{ url: threadUrl(ACCOUNT, 't1') }] })
+    expect(down).toEqual({ email: 'down@gmail.com', feeds: [], failed: true })
+
+    fetchMock.mockImplementation(async () => new Response('backend error', { status: 503 }))
+    await expect(getAllRSS()).rejects.toThrow('503')
   })
 
   it('skips accounts that need a fresh sign-in', async () => {
