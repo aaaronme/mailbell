@@ -98,6 +98,13 @@ describe('MIME decoding', () => {
 })
 
 describe('messageToMail', () => {
+  it("reads an invite's event from its text/calendar part", () => {
+    const ics = 'BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nSUMMARY:Sync\r\nDTSTART:20261103T090000Z\r\nEND:VEVENT\r\nEND:VCALENDAR'
+    const { message: mail } = messageToMail(message('m1', { parts: [part('text/plain', 'Invite'), part('text/calendar', ics)] }))
+    expect(mail.event).toMatchObject({ title: 'Sync', start: '20261103T090000', utc: true })
+    expect(mail.contentText).toBe('Invite')
+  })
+
   it('prefers the HTML part, lifting out styles and scripts', () => {
     const { message: mail, styles } = messageToMail(
       message('m1', { parts: [part('text/plain', 'Hi there'), part('text/html', HTML)] }),

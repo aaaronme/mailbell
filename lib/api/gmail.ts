@@ -13,6 +13,7 @@ import { debugLog } from '../debugLog'
 import { liftBackgroundImages } from '../emailBackground'
 import { getAccessToken, getAccounts } from '../auth/oauth'
 import { buildReply, toBase64Url, type Recipients } from '../reply'
+import { parseInvite, type CalendarEvent } from '../calendar'
 
 export interface Feed {
   title: string
@@ -54,6 +55,7 @@ interface Message {
   contentHtml: string // Email body (HTML)
   contentText?: string // Email body (plain text, optional)
   attachments?: Attachment[] // Attachments (if any)
+  event?: CalendarEvent // From an invite's text/calendar part
 }
 
 // Bumped whenever the ThreadMail produced from a thread changes in a way that
@@ -64,7 +66,8 @@ interface Message {
 // another version, and the thread cache below ignores them.
 //
 // Version 2: built from the Gmail API's MIME parts instead of the print view.
-export const CURRENT_EXTRACT_VERSION = 2
+// Version 3: calendar invites' events.
+export const CURRENT_EXTRACT_VERSION = 3
 
 export interface ThreadMail {
   subject: string
@@ -315,6 +318,7 @@ export function messageToMail(
 ): { message: Message; styles: string[] } {
   let html: GmailPart | undefined
   let text: GmailPart | undefined
+  let calendar: GmailPart | undefined
   const attachments: Attachment[] = []
   walk(msg.payload, (part) => {
     const isAttachment = !!part.filename && (part.body?.attachmentId || part.body?.data)
@@ -333,6 +337,7 @@ export function messageToMail(
     }
     if (part.mimeType === 'text/html' && !html && part.body?.data) html = part
     if (part.mimeType === 'text/plain' && !text && part.body?.data) text = part
+    if (part.mimeType === 'text/calendar' && !calendar && part.body?.data) calendar = part
   })
   const decode = (part: GmailPart) => decodeBase64Url(part.body!.data!, charsetOf(part))
   let body: { contentHtml: string; contentText: string; styles: string[] }
@@ -361,6 +366,8 @@ export function messageToMail(
     contentText: body.contentText,
   }
   if (attachments.length) message.attachments = attachments
+  const event = calendar && parseInvite(decode(calendar))
+  if (event) message.event = event
   return { message, styles: body.styles }
 }
 

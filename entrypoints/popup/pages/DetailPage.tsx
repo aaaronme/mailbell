@@ -5,7 +5,7 @@ import { useMailQuery } from '@/lib/useMailQuery'
 import type { EmailThread } from '@/lib/StateManager'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import dayjs from 'dayjs'
-import { PaperclipIcon, ChevronsUpDownIcon, ChevronsDownUpIcon, ReplyIcon, ReplyAllIcon } from 'lucide-react'
+import { PaperclipIcon, ChevronsUpDownIcon, ChevronsDownUpIcon, ReplyIcon, ReplyAllIcon, CalendarIcon, VideoIcon } from 'lucide-react'
 import { memo, useEffect, useMemo, useState } from 'react'
 import root from 'react-shadow'
 import { useCollapseState } from '@/lib/useCollapseState'
@@ -16,6 +16,7 @@ import { PageHeader, PageTitle } from '@/components/extra/PageHeader'
 import { Textarea } from '@/components/ui/textarea'
 import { bgMessager } from '@/lib/messager'
 import { replyRecipients } from '@/lib/reply'
+import { addToCalendarUrl, findMeetingLink, formatEventTime } from '@/lib/calendar'
 import { useShortcuts } from '@/lib/useShortcuts'
 
 // Not importing detailRoute directly from router.tsx: that file imports
@@ -329,6 +330,7 @@ export function DetailPage() {
         allCollapsed={collapseStore.hasCollapsed}
         onToggleAll={collapseStore.toggleAll}
       />
+      <MeetingBar thread={thread} />
       <div className="flex-1">
         <div>
           {thread.messages.map((message, i) => {
@@ -358,6 +360,48 @@ export function DetailPage() {
         </div>
         <ReplyBox thread={thread} />
       </div>
+    </div>
+  )
+}
+
+// The thread's newest invite and video-call link: join it, or add it to
+// Google Calendar.
+function MeetingBar({ thread }: { thread: EmailThread }) {
+  const newestFirst = thread.messages.toReversed()
+  const event = newestFirst.find((it) => it.event)?.event
+  const meeting = findMeetingLink([
+    ...(event?.location ? [event.location] : []),
+    ...newestFirst.map((it) => it.contentHtml),
+  ])
+  if (!event && !meeting) return null
+  return (
+    <div className="flex items-center gap-3 border-b border-foreground/10 px-4 py-2">
+      <CalendarIcon className="size-4 shrink-0 text-foreground/60" />
+      <div className="min-w-0 flex-1 truncate text-xs">
+        {event ? (
+          <>
+            <span className="font-medium">{event.title || thread.subject}</span>
+            <span className="ml-1.5 text-foreground/60 tabular-nums">{formatEventTime(event)}</span>
+          </>
+        ) : (
+          <span className="text-foreground/60">{meeting!.service} meeting</span>
+        )}
+      </div>
+      {event && (
+        <Button size="sm" variant="ghost" asChild>
+          <a href={addToCalendarUrl(event, thread.account, meeting?.url)} target="_blank">
+            Add to calendar
+          </a>
+        </Button>
+      )}
+      {meeting && (
+        <Button size="sm" variant="secondary" asChild>
+          <a href={meeting.url} target="_blank" title={meeting.url}>
+            <VideoIcon />
+            Join {meeting.service}
+          </a>
+        </Button>
+      )}
     </div>
   )
 }

@@ -52,6 +52,8 @@ Never use raw hex or `rgba()`, Tailwind palette colors (`gray-500`, `blue-600`),
 | `PageTitle` | The `font-display` heading inside it. |
 | `Button` | Three variants: `default` (emphasis fill, for the one main action), `secondary` (a `/10` fill) and `ghost` (no fill, `/70` text). Three sizes: `default`, `sm` and `icon`. |
 | `Input` | A square field with a hairline border that darkens on hover and focus. |
+| `Textarea` | `Input` over several lines. |
+| `Switch` | An on/off setting; on is the `emphasis` fill. |
 | `DropdownMenu` | `menu-surface` with flush `px-3 py-2` rows and a `/10` highlight. |
 | `Avatar` | A square `/10` tile with the sender's initial. |
 
