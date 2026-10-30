@@ -1,6 +1,7 @@
 import { defineExtensionMessaging } from '@webext-core/messaging'
 import type { UnsubscribePlan } from './unsubscribe'
 import type { OAuthClient } from './auth/oauth'
+import type { Recipients } from './reply'
 
 export const bgMessager = defineExtensionMessaging<{
   // popup to background
@@ -16,6 +17,8 @@ export const bgMessager = defineExtensionMessaging<{
   removeAccount(email: string): void
   // popup to background: null goes back to the built-in client
   setOAuthClient(client: OAuthClient | null): void
+  // popup to background: a plain-text reply into the thread at url
+  sendReply(data: { url: string; recipients: Recipients; text: string }): void
 }>()
 
 export type GmailAction =

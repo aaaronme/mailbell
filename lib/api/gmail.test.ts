@@ -6,6 +6,7 @@ import {
   decodeBase64Url,
   getAllRSS,
   getRawMessage,
+  sendReply,
   getThreadMail,
   markAsSpam,
   messageToMail,
@@ -190,11 +191,18 @@ describe('Gmail API calls', () => {
         messages: [
           {
             ...thread.messages[0],
-            payload: { mimeType: 'text/html', headers: [{ name: 'List-Unsubscribe', value: '<https://u.example/x>' }] },
+            payload: {
+              mimeType: 'text/html',
+              headers: [
+                { name: 'List-Unsubscribe', value: '<https://u.example/x>' },
+                { name: 'Subject', value: 'Plans' },
+                { name: 'Message-ID', value: '<m1@example.com>' },
+              ].filter((h) => url.includes(`metadataHeaders=${h.name}`)),
+            },
           },
         ],
       }
-    if (path === '/threads/t1/modify') return { body: JSON.parse(String(init?.body)) }
+    if (path === '/threads/t1/modify' || path === '/messages/send') return { body: JSON.parse(String(init?.body)) }
     throw new Error('unexpected ' + path)
   }
 
@@ -263,5 +271,16 @@ describe('Gmail API calls', () => {
 
   it('builds a header block planUnsubscribe can read', async () => {
     expect(await getRawMessage(threadUrl(ACCOUNT, 't1'))).toBe('List-Unsubscribe: <https://u.example/x>\r\n\r\n')
+  })
+
+  it('sends a reply into the thread, threaded on the newest message', async () => {
+    await sendReply(threadUrl(ACCOUNT, 't1'), { to: ['bob@example.com'], cc: [] }, 'Sounds good')
+    const [, init] = fetchMock.mock.calls.at(-1)!
+    const { raw, threadId } = JSON.parse(String(init.body))
+    expect(threadId).toBe('t1')
+    const mime = atob(raw.replace(/-/g, '+').replace(/_/g, '/'))
+    expect(mime).toContain('To: bob@example.com\r\n')
+    expect(mime).toContain('Subject: Re: Plans\r\n')
+    expect(mime).toContain('In-Reply-To: <m1@example.com>\r\nReferences: <m1@example.com>\r\n')
   })
 })

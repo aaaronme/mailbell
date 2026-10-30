@@ -5,14 +5,18 @@ import { useMailQuery } from '@/lib/useMailQuery'
 import type { EmailThread } from '@/lib/StateManager'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import dayjs from 'dayjs'
-import { PaperclipIcon, ChevronsUpDownIcon, ChevronsDownUpIcon } from 'lucide-react'
-import { memo, useEffect, useMemo } from 'react'
+import { PaperclipIcon, ChevronsUpDownIcon, ChevronsDownUpIcon, ReplyIcon, ReplyAllIcon } from 'lucide-react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import root from 'react-shadow'
 import { useCollapseState } from '@/lib/useCollapseState'
 import { createStyleSheets } from '@/lib/addStyle'
 import { MailActions, urlsFromSender } from '@/components/extra/MailActions'
 import { Avatar } from '@/components/extra/Avatar'
 import { PageHeader, PageTitle } from '@/components/extra/PageHeader'
+import { Textarea } from '@/components/ui/textarea'
+import { bgMessager } from '@/lib/messager'
+import { replyRecipients } from '@/lib/reply'
+import { useShortcuts } from '@/lib/useShortcuts'
 
 // Not importing detailRoute directly from router.tsx: that file imports
 // this one (as the route's component), so a direct import would be
@@ -352,6 +356,78 @@ export function DetailPage() {
             )
           })}
         </div>
+        <ReplyBox thread={thread} />
+      </div>
+    </div>
+  )
+}
+
+// Reply or reply all, in plain text, without leaving the popup.
+function ReplyBox({ thread }: { thread: EmailThread }) {
+  const [mode, setMode] = useState<'reply' | 'all' | null>(null)
+  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
+  const last = thread.messages.at(-1)
+  const canReplyAll = !!last && replyRecipients(last, thread.account, true).cc.length > 0
+  useShortcuts({ r: () => setMode('reply'), a: () => canReplyAll && setMode('all') }, mode === null && !!last)
+  if (!last) return null
+
+  if (!mode) {
+    return (
+      <div className="flex gap-2 p-4">
+        <Button size="sm" variant="secondary" title="Reply (r)" onClick={() => setMode('reply')}>
+          <ReplyIcon />
+          Reply
+        </Button>
+        {canReplyAll && (
+          <Button size="sm" variant="secondary" title="Reply all (a)" onClick={() => setMode('all')}>
+            <ReplyAllIcon />
+            Reply all
+          </Button>
+        )}
+      </div>
+    )
+  }
+
+  const recipients = replyRecipients(last, thread.account, mode === 'all')
+  async function send() {
+    if (!text.trim() || sending) return
+    setSending(true)
+    try {
+      await bgMessager.sendMessage('sendReply', { url: thread.url, recipients, text })
+      toast.success('Reply sent')
+      setText('')
+      setMode(null)
+    } catch (err) {
+      console.error(err)
+      toast.error(`Reply failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setSending(false)
+    }
+  }
+  return (
+    <div className="flex flex-col gap-2 border-t border-foreground/10 p-4">
+      <div className="truncate text-xs text-foreground/60">
+        To {recipients.to.join(', ')}
+        {recipients.cc.length > 0 && <span className="text-foreground/40"> · Cc {recipients.cc.join(', ')}</span>}
+      </div>
+      <Textarea
+        autoFocus
+        aria-label="Reply"
+        value={text}
+        disabled={sending}
+        onChange={(ev) => setText(ev.target.value)}
+        onKeyDown={(ev) => {
+          if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) void send()
+        }}
+      />
+      <div className="flex gap-2">
+        <Button size="sm" title="Send (Ctrl/Cmd+Enter)" disabled={!text.trim() || sending} onClick={send}>
+          {sending ? 'Sending…' : 'Send'}
+        </Button>
+        <Button size="sm" variant="ghost" disabled={sending} onClick={() => setMode(null)}>
+          Cancel
+        </Button>
       </div>
     </div>
   )

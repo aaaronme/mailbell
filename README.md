@@ -11,6 +11,7 @@ Mailbell signs in with Google OAuth and talks to the official [Gmail API](https:
 - Several Google accounts side by side.
 - Read whole threads in the popup, including HTML mail, inline images and attachments, with automatic dark mode.
 - Archive, delete, mark as read or unread, or report spam, for one thread or in bulk.
+- Quick reply and reply all from the opened thread, in plain text.
 - Gmail's keyboard shortcuts: `j`/`k` to move, `Enter` to open, `e` archive, `#` trash, `Shift+I` mark as read, `!` spam, `u` back, `c` compose.
 - One-click unsubscribe (RFC 8058) when the sender supports it.
 - One-time codes from verification emails shown ready to copy.
@@ -19,7 +20,7 @@ Mailbell signs in with Google OAuth and talks to the official [Gmail API](https:
 
 Your mail goes only between your browser and Google. Mailbell has no server, no analytics and no telemetry. Tokens and cached mail stay in the extension's local storage. Removing an account revokes its token with Google.
 
-Mailbell asks for the `gmail.modify` scope. That scope lets it read mail and change labels (read, archive, spam, trash). It cannot delete mail permanently or send mail.
+Mailbell asks for the `gmail.modify` scope. That scope lets it read mail, change labels (read, archive, spam, trash) and send mail; Mailbell sends only the replies you write in the popup. It cannot delete mail permanently.
 
 ## Sign-in and the "unverified app" warning
 

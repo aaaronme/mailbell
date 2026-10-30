@@ -11,6 +11,7 @@ import {
   getThreadMail,
   markAsRead,
   markAsSpam,
+  sendReply,
   markAsUnread,
   openMailInWeb,
   parseThreadUrl,
@@ -226,6 +227,15 @@ async function start() {
       await browser.tabs.create({ url: composeUrl(account, { to: plan.to, su: plan.subject }) })
     }
     return plan.kind
+  })
+  // In the background, not the popup: a send must finish even if the popup
+  // closes meanwhile.
+  bgMessager.onMessage('sendReply', async ({ data }) => {
+    await sendReply(data.url, data.recipients, data.text).catch(async (err) => {
+      await debugLog('sendReply: failed ->', String(err))
+      throw err
+    })
+    void stateManager.refresh().catch(() => {})
   })
   bgMessager.onMessage('gmailAction', async ({ data }) => {
     switch (data.cmd) {

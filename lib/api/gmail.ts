@@ -12,6 +12,7 @@ import {
 import { debugLog } from '../debugLog'
 import { liftBackgroundImages } from '../emailBackground'
 import { getAccessToken, getAccounts } from '../auth/oauth'
+import { buildReply, toBase64Url, type Recipients } from '../reply'
 
 export interface Feed {
   title: string
@@ -597,6 +598,26 @@ export async function getRawMessage(url: string): Promise<string> {
   )
   const last = visibleMessages(thread).at(-1)
   return (last?.payload.headers ?? []).map((h) => `${h.name}: ${h.value}`).join('\r\n') + '\r\n\r\n'
+}
+
+// Sends a plain-text reply into the thread. Subject and the threading
+// headers come from Gmail, fresh, rather than from the cached mail.
+export async function sendReply(url: string, recipients: Recipients, text: string) {
+  const { account, threadId } = requireThread(url)
+  const thread = await gmailFetch<GmailThread>(
+    account,
+    `/threads/${threadId}?format=metadata&metadataHeaders=Subject&metadataHeaders=Message-ID&metadataHeaders=References`,
+  )
+  const last = visibleMessages(thread).at(-1)!.payload
+  const messageId = header(last, 'Message-ID')
+  const raw = buildReply({
+    recipients,
+    subject: header(last, 'Subject') ?? '',
+    inReplyTo: messageId,
+    references: [header(last, 'References'), messageId].filter(Boolean).join(' ') || undefined,
+    text,
+  })
+  await gmailFetch(account, '/messages/send', { method: 'POST', body: JSON.stringify({ raw: toBase64Url(raw), threadId }) })
 }
 
 export async function getAttachmentBlob(account: string, attachment: Attachment): Promise<Blob> {
