@@ -185,7 +185,7 @@ const CollapsedMessagesIndicator = memo((props: { count: number; onExpand: () =>
     className="flex w-full cursor-pointer items-center justify-center gap-2 border-b border-foreground/10 py-2 text-xs text-foreground/60 transition-colors hover:bg-foreground/5 hover:text-foreground"
     onClick={props.onExpand}
   >
-    <span className="font-medium tabular-nums">{props.count}</span> messages collapsed
+    Show <span className="font-medium tabular-nums">{props.count}</span> earlier messages
     <ChevronsUpDownIcon className="size-3" />
   </button>
 ))
@@ -219,8 +219,16 @@ const MailMessage = function MailMessage(props: {
     return (
       <div
         data-testid="mail-message"
+        role="button"
+        tabIndex={0}
         className="flex cursor-pointer items-center gap-3 border-b border-foreground/10 px-4 py-3 transition-colors hover:bg-foreground/5"
         onClick={onToggle}
+        onKeyDown={(ev) => {
+          if (ev.key === 'Enter' || ev.key === ' ') {
+            ev.preventDefault()
+            onToggle()
+          }
+        }}
       >
         <Avatar name={message.senderName} />
         <div className="min-w-0 flex-1">
@@ -278,7 +286,7 @@ const MailMessage = function MailMessage(props: {
               className="flex cursor-pointer items-center gap-1.5 border border-foreground/15 px-2 py-1 text-xs text-foreground/80 transition-colors hover:border-foreground/30 hover:bg-foreground/5"
             >
               <PaperclipIcon className="size-3 text-foreground/60" />
-              <span className="truncate max-w-[200px]">{attachment.fileName}</span>
+              <span className="max-w-48 truncate">{attachment.fileName}</span>
             </button>
           ))}
         </div>
@@ -396,7 +404,7 @@ function MeetingBar({ thread }: { thread: EmailThread }) {
       )}
       {meeting && (
         <Button size="sm" variant="secondary" asChild>
-          <a href={meeting.url} target="_blank" title={meeting.url}>
+          <a href={meeting.url} target="_blank" rel="noreferrer" title={meeting.url}>
             <VideoIcon />
             Join {meeting.service}
           </a>
@@ -418,7 +426,7 @@ function ReplyBox({ thread }: { thread: EmailThread }) {
 
   if (!mode) {
     return (
-      <div className="flex gap-2 p-4">
+      <div className="flex gap-2 border-t border-foreground/10 p-4">
         <Button size="sm" variant="secondary" title="Reply (r)" onClick={() => setMode('reply')}>
           <ReplyIcon />
           Reply
@@ -490,7 +498,7 @@ function DetailToolbar(props: {
       back
       title={
         <a
-          className="min-w-0 hover:underline"
+          className="min-w-0 transition-colors hover:text-foreground/80"
           href={thread.url}
           title="Open in Gmail"
           onClick={(ev) => {
@@ -511,7 +519,7 @@ function DetailToolbar(props: {
         <Button
           size="icon"
           variant="ghost"
-          title={props.allCollapsed ? 'All Collapsed' : 'All Expanded'}
+          title={props.allCollapsed ? 'Expand all' : 'Collapse all'}
           onClick={props.onToggleAll}
         >
           {props.allCollapsed ? <ChevronsUpDownIcon /> : <ChevronsDownUpIcon />}

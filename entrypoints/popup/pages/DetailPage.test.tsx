@@ -61,7 +61,7 @@ async function renderDetail(thread: EmailThread) {
 }
 
 // Every message must end up either directly rendered or accounted for by a
-// "N messages collapsed" indicator - none may silently disappear.
+// "Show N earlier messages" indicator - none may silently disappear.
 function renderedMessageSlots(container: HTMLElement) {
   const messageBlocks = container.querySelectorAll('[data-testid="mail-message"]').length
   const indicator = container.querySelector('[data-testid="collapsed-indicator"]')
@@ -81,21 +81,21 @@ describe('DetailPage', () => {
     const screen = await renderDetail(thread)
     await screen.getByTitle('Archive').click()
     expect(send).toBeCalledWith('gmailAction', { cmd: 'archive', url: thread.url })
-    await expect.element(screen.getByTitle('Trash')).toBeVisible()
+    await expect.element(screen.getByTitle('Delete (#)')).toBeVisible()
     await expect.element(screen.getByTitle('Open in Gmail').last()).toBeVisible()
   })
 
   it('hides the collapse-all toggle for a single-message thread', async () => {
     const screen = await renderDetail(makeThread(1))
     await expect.element(screen.getByTitle('Open in Gmail').first()).toBeInTheDocument()
-    expect(screen.getByTitle('All Collapsed').query()).toBeNull()
-    expect(screen.getByTitle('All Expanded').query()).toBeNull()
+    expect(screen.getByTitle('Expand all').query()).toBeNull()
+    expect(screen.getByTitle('Collapse all').query()).toBeNull()
   })
 
   it('shows the collapse-all toggle for a multi-message thread', async () => {
     const screen = await renderDetail(makeThread(3))
     await expect.element(screen.getByTitle('Open in Gmail').first()).toBeInTheDocument()
-    const toggle = screen.getByTitle('All Collapsed').query() ?? screen.getByTitle('All Expanded').query()
+    const toggle = screen.getByTitle('Expand all').query() ?? screen.getByTitle('Collapse all').query()
     expect(toggle).not.toBeNull()
   })
 
@@ -113,7 +113,7 @@ describe('DetailPage', () => {
     // DetailPage ever mounts, so navigating straight to a thread that isn't
     // in storage should land on the list page without ever showing a
     // detail-page element (back button, "Open in Gmail" link) at all.
-    await fakeBrowser.storage.local.set({ email: 'me@example.com', threads: [makeThread(1)] })
+    await fakeBrowser.storage.local.set({ accounts: ['me@example.com'], threads: [makeThread(1)] })
     const router = createAppRouter([`/detail/${encodeURIComponent('https://mail.google.com/does-not-exist')}`])
     const screen = await render(
       <QueryClientProvider client={queryClient}>

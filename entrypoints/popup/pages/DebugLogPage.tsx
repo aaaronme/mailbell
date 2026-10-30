@@ -14,7 +14,7 @@ export function DebugLogPage() {
 
   async function copy() {
     await navigator.clipboard.writeText(logs.join('\n'))
-    toast.success('Copied to clipboard')
+    toast.success('Copied')
   }
 
   async function clear() {
