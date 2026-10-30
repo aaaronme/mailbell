@@ -3,7 +3,7 @@ import { fakeBrowser } from '@webext-core/fake-browser'
 
 vi.stubGlobal('browser', fakeBrowser)
 
-const { getNotificationSound, setNotificationSound, clearNotificationSound, playNotificationSound, MAX_SOUND_BYTES } =
+const { getNotificationSound, setNotificationSound, playNotificationSound, MAX_SOUND_BYTES } =
   await import('./sound')
 
 describe('notification sound', () => {
@@ -21,13 +21,18 @@ describe('notification sound', () => {
     vi.stubGlobal('Audio', Audio)
     await setNotificationSound(new File(['abc'], 'New Mail.wav', { type: 'audio/wav' }))
     expect((await getNotificationSound())?.name).eq('New Mail.wav')
-    await playNotificationSound()
+    await playNotificationSound('custom')
     expect(Audio).toHaveBeenCalledWith(expect.stringMatching(/^data:audio\/wav;base64,/))
     expect(play).toHaveBeenCalledOnce()
 
-    await clearNotificationSound()
-    await playNotificationSound()
-    expect(play).toHaveBeenCalledOnce()
+    await playNotificationSound('chime')
+    expect(Audio).toHaveBeenLastCalledWith(expect.stringMatching(/\/sounds\/chime\.wav$/))
+
+    // The system sound, or a custom choice with its file gone: nothing of ours.
+    await fakeBrowser.storage.local.remove('notificationSound')
+    await playNotificationSound('custom')
+    await playNotificationSound('system')
+    expect(play).toHaveBeenCalledTimes(2)
   })
 
   it('rejects files that are too large', async () => {

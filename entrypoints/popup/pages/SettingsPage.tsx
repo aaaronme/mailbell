@@ -1,17 +1,35 @@
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CopyIcon } from 'lucide-react'
+import { CheckIcon, ChevronDownIcon, CopyIcon } from 'lucide-react'
 import { PageHeader, PageTitle } from '@/components/extra/PageHeader'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { bgMessager } from '@/lib/messager'
 import { getBuiltInClient, getCustomClient } from '@/lib/auth/oauth'
 import { useAccounts } from '@/lib/useAccounts'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
-import { getSettings, POLL_MINUTES, updateSettings, type Settings } from '@/lib/settings'
-import { clearNotificationSound, getNotificationSound, playSound, setNotificationSound } from '@/lib/sound'
+import {
+  accountSettings,
+  getSettings,
+  POLL_MINUTES,
+  SOUNDS,
+  updateAccountSettings,
+  updateSettings,
+  type AccountSettings,
+  type NotifyFor,
+  type Settings,
+  type SoundId,
+} from '@/lib/settings'
+import { getNotificationSound, previewSound, setNotificationSound } from '@/lib/sound'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { isPopoutTab } from '../view'
 
 const clientQueryKey = ['oauthClient']
@@ -43,6 +61,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function AccountsSection() {
   const queryClient = useQueryClient()
   const accounts = useAccounts().data ?? []
+  const { settings } = useSettings()
 
   async function remove(email: string) {
     await bgMessager.sendMessage('removeAccount', email)
@@ -58,10 +77,12 @@ function AccountsSection() {
             <div className="truncate font-medium">{account.email}</div>
             {account.needsReauth && <div className="text-xs text-destructive">Signed out by Google</div>}
           </div>
-          {account.needsReauth && (
+          {account.needsReauth ? (
             <Button size="sm" onClick={() => addAccount(account.email)}>
               Reconnect
             </Button>
+          ) : (
+            settings?.notifications && <AccountNotifications email={account.email} />
           )}
           <Button size="sm" variant="secondary" onClick={() => remove(account.email)}>
             Remove
@@ -74,6 +95,29 @@ function AccountsSection() {
         </Button>
       </div>
     </Section>
+  )
+}
+
+// Per account: notify or not, and with which sound.
+function AccountNotifications({ email }: { email: string }) {
+  const { settings, updateAccount } = useSettings()
+  if (!settings) return null
+  const account = accountSettings(settings, email)
+  return (
+    <>
+      {canPlaySounds && account.notifications && (
+        <SoundSelect
+          value={account.sound}
+          defaultLabel={`Default (${SOUND_LABELS[settings.sound]})`}
+          onChange={(sound) => updateAccount(email, { sound })}
+        />
+      )}
+      <Switch
+        title="Notifications for this account"
+        checked={account.notifications}
+        onCheckedChange={(notifications) => updateAccount(email, { notifications })}
+      />
+    </>
   )
 }
 
@@ -94,111 +138,196 @@ function formatMinutes(minutes: number) {
   return minutes < 1 ? `${minutes * 60} s` : `${minutes} min`
 }
 
-function NotificationsSection() {
+function useSettings() {
   const queryClient = useQueryClient()
   const settings = useQuery({ queryKey: settingsQueryKey, queryFn: getSettings }).data
-
-  async function update(patch: Partial<Settings>) {
-    await updateSettings(patch)
+  async function invalidate() {
     await queryClient.invalidateQueries({ queryKey: settingsQueryKey })
   }
+  return {
+    settings,
+    update: (patch: Partial<Settings>) => updateSettings(patch).then(invalidate),
+    updateAccount: (account: string, patch: Partial<AccountSettings>) => updateAccountSettings(account, patch).then(invalidate),
+  }
+}
+
+// Only Firefox's background page can play audio (see lib/sound.ts).
+const canPlaySounds = import.meta.env.FIREFOX
+
+function NotificationsSection() {
+  const { settings, update } = useSettings()
 
   if (!settings) return null
+  const { quietHours } = settings
   return (
     <Section title="Notifications">
       <Row label="Desktop notifications" hint={settings.notifications ? undefined : 'New mail only updates the unread count on the toolbar icon.'}>
         <Switch checked={settings.notifications} onCheckedChange={(notifications) => update({ notifications })} />
       </Row>
-      {/* Only Firefox's background page can play audio (see lib/sound.ts). */}
-      {import.meta.env.FIREFOX && settings.notifications && <SoundRow />}
-      <Row label="Check for new mail every">
-        <div className="flex gap-1">
-          {POLL_MINUTES.map((minutes) => (
-            <Button
-              key={minutes}
-              size="sm"
-              variant={settings.pollMinutes === minutes ? 'default' : 'ghost'}
-              className="tabular-nums"
-              onClick={() => update({ pollMinutes: minutes })}
+      {settings.notifications && (
+        <>
+          <Row
+            label="Notify for"
+            hint={settings.notifyFor === 'primary' ? "Mail Gmail doesn't sort into Social, Promotions, Updates or Forums." : undefined}
+          >
+            <Choice<NotifyFor>
+              options={[
+                ['all', 'All new mail'],
+                ['primary', 'Primary'],
+                ['important', 'Important'],
+              ]}
+              value={settings.notifyFor}
+              onChange={(notifyFor) => update({ notifyFor })}
+            />
+          </Row>
+          {canPlaySounds && (
+            <Row
+              label="Sound"
+              hint={
+                settings.sound === 'system'
+                  ? undefined
+                  : 'To avoid hearing two sounds, turn off "Play sound for notifications" for Firefox in macOS System Settings → Notifications.'
+              }
             >
-              {formatMinutes(minutes)}
-            </Button>
-          ))}
-        </div>
+              <SoundSelect value={settings.sound} onChange={(sound) => update({ sound: sound ?? 'system' })} />
+            </Row>
+          )}
+          <Row label="Quiet hours" hint={quietHours.enabled ? 'No notifications in between; the unread count still updates.' : undefined}>
+            {quietHours.enabled && (
+              <div className="flex items-center gap-1.5 text-xs text-foreground/60">
+                <Input
+                  type="time"
+                  aria-label="Quiet from"
+                  className="w-28 tabular-nums"
+                  value={quietHours.start}
+                  onChange={(ev) => ev.target.value && update({ quietHours: { ...quietHours, start: ev.target.value } })}
+                />
+                to
+                <Input
+                  type="time"
+                  aria-label="Quiet until"
+                  className="w-28 tabular-nums"
+                  value={quietHours.end}
+                  onChange={(ev) => ev.target.value && update({ quietHours: { ...quietHours, end: ev.target.value } })}
+                />
+              </div>
+            )}
+            <Switch checked={quietHours.enabled} onCheckedChange={(enabled) => update({ quietHours: { ...quietHours, enabled } })} />
+          </Row>
+        </>
+      )}
+      <Row label="Check for new mail every">
+        <Choice
+          options={POLL_MINUTES.map((minutes) => [minutes, formatMinutes(minutes)])}
+          value={settings.pollMinutes}
+          onChange={(pollMinutes) => update({ pollMinutes })}
+        />
       </Row>
     </Section>
   )
 }
 
-function SoundRow() {
+// A row of buttons, the chosen one filled.
+function Choice<T>({ options, value, onChange }: { options: [T, string][]; value: T; onChange: (value: T) => void }) {
+  return (
+    <div className="flex gap-1">
+      {options.map(([option, label]) => (
+        <Button
+          key={String(option)}
+          size="sm"
+          variant={value === option ? 'default' : 'ghost'}
+          className="tabular-nums"
+          onClick={() => onChange(option)}
+        >
+          {label}
+        </Button>
+      ))}
+    </div>
+  )
+}
+
+const SOUND_LABELS: Record<SoundId, string> = {
+  system: 'System sound',
+  chime: 'Chime',
+  ping: 'Ping',
+  pop: 'Pop',
+  bell: 'Bell',
+  custom: 'Your file',
+}
+
+// Picks a sound and plays it. With `defaultLabel`, undefined is a choice too
+// (an account using the default sound).
+function SoundSelect({
+  value,
+  onChange,
+  defaultLabel,
+}: {
+  value: SoundId | undefined
+  onChange: (sound: SoundId | undefined) => void
+  defaultLabel?: string
+}) {
   const queryClient = useQueryClient()
-  const sound = useQuery({ queryKey: soundQueryKey, queryFn: getNotificationSound }).data ?? null
+  const custom = useQuery({ queryKey: soundQueryKey, queryFn: getNotificationSound }).data ?? null
+  const fileInput = useRef<HTMLInputElement>(null)
+
+  function choose(sound: SoundId | undefined) {
+    onChange(sound)
+    if (sound) void previewSound(sound)
+  }
 
   async function pick(file: File | undefined) {
     if (!file) return
     try {
-      const picked = await setNotificationSound(file)
+      await setNotificationSound(file)
       await queryClient.invalidateQueries({ queryKey: soundQueryKey })
-      await playSound(picked)
-      toast.success('Sound saved')
+      choose('custom')
     } catch (err) {
       console.error(err)
       toast.error(String(err))
     }
   }
 
-  async function remove() {
-    await clearNotificationSound()
-    await queryClient.invalidateQueries({ queryKey: soundQueryKey })
+  function chooseFile() {
+    // Firefox closes the toolbar popup as soon as a file dialog opens, so the
+    // picker only works in the standalone tab.
+    if (isPopoutTab) {
+      fileInput.current?.click()
+      return
+    }
+    void browser.tabs.create({ url: browser.runtime.getURL('/popup.html?view=tab&page=/settings') })
+    window.close()
   }
 
+  const label = (sound: SoundId) => (sound === 'custom' && custom ? custom.name : SOUND_LABELS[sound])
   return (
-    <Row
-      label={
-        <>
-          Sound <span className={cn('ml-1.5', sound ? 'text-foreground/60' : 'text-foreground/40')}>{sound?.name ?? 'System sound'}</span>
-        </>
-      }
-      hint={
-        sound
-          ? 'To avoid hearing two sounds, turn off "Play sound for notifications" for Firefox in macOS System Settings → Notifications.'
-          : undefined
-      }
-    >
-      <div className="flex gap-1">
-        {sound && (
-          <>
-            <Button size="sm" variant="ghost" onClick={() => playSound(sound)}>
-              Test
-            </Button>
-            <Button size="sm" variant="ghost" onClick={remove}>
-              Remove
-            </Button>
-          </>
-        )}
-        {/* Firefox closes the toolbar popup as soon as a file dialog opens,
-            so the picker only works in the standalone tab. */}
-        {isPopoutTab ? (
-          <Button size="sm" variant="secondary" asChild>
-            <label>
-              Choose file
-              <input type="file" accept="audio/*" className="hidden" onChange={(ev) => pick(ev.target.files?.[0])} />
-            </label>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="secondary" className="max-w-48">
+            <span className="truncate">{value ? label(value) : defaultLabel}</span>
+            <ChevronDownIcon />
           </Button>
-        ) : (
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              void browser.tabs.create({ url: browser.runtime.getURL('/popup.html?view=tab&page=/settings') })
-              window.close()
-            }}
-          >
-            Choose file
-          </Button>
-        )}
-      </div>
-    </Row>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {defaultLabel && <SoundItem label={defaultLabel} checked={!value} onSelect={() => choose(undefined)} />}
+          {SOUNDS.filter((sound) => sound !== 'custom' || custom).map((sound) => (
+            <SoundItem key={sound} label={label(sound)} checked={value === sound} onSelect={() => choose(sound)} />
+          ))}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={chooseFile}>{custom ? 'Choose another file…' : 'Choose file…'}</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <input ref={fileInput} type="file" accept="audio/*" className="hidden" onChange={(ev) => pick(ev.target.files?.[0])} />
+    </>
+  )
+}
+
+function SoundItem({ label, checked, onSelect }: { label: string; checked: boolean; onSelect: () => void }) {
+  return (
+    <DropdownMenuItem onSelect={onSelect}>
+      <CheckIcon className={cn(!checked && 'invisible')} />
+      <span className="truncate">{label}</span>
+    </DropdownMenuItem>
   )
 }
 

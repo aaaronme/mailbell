@@ -148,6 +148,7 @@ describe('threadToFeed / threadToMail', () => {
         subject: 'Re: Plans',
         date: Date.UTC(2026, 9, 30),
         parts: [part('text/plain', 'two')],
+        labels: ['INBOX', 'IMPORTANT'],
       }),
       message('d1', { date: Date.UTC(2026, 9, 31), parts: [part('text/plain', 'draft')], labels: ['DRAFT'] }),
     ],
@@ -160,6 +161,7 @@ describe('threadToFeed / threadToMail', () => {
       url: threadUrl('me@gmail.com', 't1'),
       modified: '2026-10-30T00:00:00.000Z',
       author: { name: 'Bob', email: 'bob@example.com' },
+      labels: ['INBOX', 'IMPORTANT'],
     })
     const mail = threadToMail(thread)
     expect(mail.messageCount).toBe(2)

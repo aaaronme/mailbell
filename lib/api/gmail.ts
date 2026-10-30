@@ -25,6 +25,9 @@ export interface Feed {
     name: string
     email: string
   }
+  // The newest message's Gmail labels (IMPORTANT, CATEGORY_*), for the
+  // notification filter. Absent on threads cached before it existed.
+  labels?: string[]
 }
 
 export interface RSSInfo {
@@ -393,6 +396,7 @@ export function threadToFeed(account: string, thread: GmailThread): Feed {
     url: threadUrl(account, thread.id),
     modified: new Date(Number(last.internalDate)).toISOString(),
     author: parseMailbox(header(last.payload, 'From') ?? ''),
+    labels: last.labelIds ?? [],
   }
 }
 

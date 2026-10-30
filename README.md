@@ -6,7 +6,8 @@ Mailbell signs in with Google OAuth and talks to the official [Gmail API](https:
 
 ## Features
 
-- Desktop notifications for new unread mail in your inbox, with an optional custom sound.
+- Desktop notifications for new unread mail in your inbox: for all mail, Primary only or Important only, with quiet hours, and on or off per account.
+- A notification sound per account: four built-in sounds or your own file.
 - Several Google accounts side by side.
 - Read whole threads in the popup, including HTML mail, inline images and attachments, with automatic dark mode.
 - Archive, delete, mark as read or unread, or report spam, for one thread or in bulk.

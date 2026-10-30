@@ -24,7 +24,7 @@ import { registerActionMenus } from '@/lib/menu'
 import { menus } from '@/lib/constants'
 import { debugLog } from '@/lib/debugLog'
 import { playNotificationSound } from '@/lib/sound'
-import { getSettings, isSettingsChange } from '@/lib/settings'
+import { getSettings, isSettingsChange, notificationSound } from '@/lib/settings'
 
 const iconPaths = (dir: string) =>
   Object.fromEntries([16, 32, 48, 96, 128].map((size) => [size, `${dir}/${size}.png`])) as Record<number, string>
@@ -52,7 +52,8 @@ async function sendNotification(stateManager: StateManager, feed: EmailThread) {
   // Claim it before the first await: a fetch overlapping this one (the popup
   // opening mid-poll) otherwise saw it as new too and played the sound again.
   stateManager.notifiedEmails.add(feed.url)
-  if (!(await getSettings()).notifications) return
+  const sound = notificationSound(await getSettings(), feed)
+  if (sound === null) return
   await debugLog('sendNotification ->', feed.url)
 
   await browser.notifications.create(notificationId, {
@@ -62,7 +63,7 @@ async function sendNotification(stateManager: StateManager, feed: EmailThread) {
     title: (import.meta.env.DEV ? 'DEV: ' : '') + withCode(feed),
     message: `From: ${feed.author.name} <${feed.author.email}>\n${feed.summary}`,
   })
-  await playNotificationSound()
+  await playNotificationSound(sound)
   setTimeout(async () => {
     console.log('auto clear notification', notificationId)
     await browser.notifications.clear(notificationId)

@@ -1,4 +1,6 @@
 import { debugLog } from '@/lib/debugLog'
+import type { SoundId } from '@/lib/settings'
+import type { PublicPath } from 'wxt/browser'
 
 // The user's own sound file, kept as a data URL: an extension can't read a
 // file:// path later, so the file's bytes have to be stored when it's picked.
@@ -32,26 +34,28 @@ export async function setNotificationSound(file: File): Promise<NotificationSoun
   return sound
 }
 
-export async function clearNotificationSound() {
-  await browser.storage.local.remove(STORAGE_KEY)
+// The audio for a sound choice: a bundled file, the user's file, or null for
+// the system sound (or a custom choice whose file is gone).
+async function soundUrl(id: SoundId): Promise<string | null> {
+  if (id === 'system') return null
+  if (id === 'custom') return (await getNotificationSound())?.dataUrl ?? null
+  return browser.runtime.getURL(`/sounds/${id}.wav` as PublicPath)
 }
 
-export async function playSound(sound: NotificationSound) {
-  await new Audio(sound.dataUrl).play()
+export async function previewSound(id: SoundId) {
+  const url = await soundUrl(id)
+  if (url) await new Audio(url).play()
 }
 
-// Plays the chosen sound, if any. Needs a page with Audio: Firefox's
-// background is an event page and has one; Chrome's service worker doesn't.
-export async function playNotificationSound() {
+// Needs a page with Audio: Firefox's background is an event page and has one;
+// Chrome's service worker doesn't.
+export async function playNotificationSound(id: SoundId) {
   if (typeof Audio === 'undefined') return
-  const sound = await getNotificationSound()
-  if (!sound) {
-    await debugLog('playNotificationSound: no sound set')
-    return
-  }
+  const url = await soundUrl(id)
+  if (!url) return
   try {
-    await playSound(sound)
-    await debugLog('playNotificationSound: played ->', sound.name)
+    await new Audio(url).play()
+    await debugLog('playNotificationSound: played ->', id)
   } catch (err) {
     await debugLog('playNotificationSound: failed ->', String(err))
   }
