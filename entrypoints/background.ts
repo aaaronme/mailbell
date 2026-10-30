@@ -26,15 +26,16 @@ import { debugLog } from '@/lib/debugLog'
 import { playNotificationSound } from '@/lib/sound'
 import { getSettings, isSettingsChange } from '@/lib/settings'
 
-// Update badge
+const iconPaths = (dir: string) =>
+  Object.fromEntries([16, 32, 48, 96, 128].map((size) => [size, `${dir}/${size}.png`])) as Record<number, string>
+
+// The envelope gets a dot while anything is unread (assets/icon), and the
+// badge says how much.
 async function updateBadge(unreadCount: number) {
-  if (unreadCount === 0) {
-    browser.action.setBadgeText({ text: '' })
-    return
-  }
-  await browser.action.setBadgeText({ text: unreadCount.toString() })
-  await browser.action.setBadgeBackgroundColor({ color: '#FF0000' })
-  await browser.action.setBadgeTextColor({ color: '#FFFFFF' })
+  await browser.action.setIcon({ path: iconPaths(unreadCount ? '/icon/unread' : '/icon') })
+  await browser.action.setBadgeText({ text: unreadCount ? unreadCount.toString() : '' })
+  await browser.action.setBadgeBackgroundColor({ color: '#df484c' })
+  await browser.action.setBadgeTextColor({ color: '#ffffff' })
 }
 
 function withCode(thread: EmailThread) {
