@@ -15,7 +15,7 @@ import {
   openMailInWeb,
   parseThreadUrl,
 } from '@/lib/api/gmail'
-import { removeAccount, signIn } from '@/lib/auth/oauth'
+import { getAccounts, removeAccount, setCustomClient, signIn } from '@/lib/auth/oauth'
 import type { PublicPath } from 'wxt/browser'
 import { StateManager, type EmailThread } from '@/lib/StateManager'
 import { getThreadCode } from '@/lib/otp'
@@ -52,15 +52,6 @@ async function sendNotification(stateManager: StateManager, feed: EmailThread) {
   stateManager.notifiedEmails.add(feed.url)
   await debugLog('sendNotification ->', feed.url)
 
-  // Safari doesn't support the notifications API (same "unsupported manifest
-  // key" warning as idle) - skip instead of throwing.
-  if (!browser.notifications) {
-    await debugLog(
-      'sendNotification: browser.notifications unsupported, skipping',
-    )
-    return
-  }
-
   await browser.notifications.create(notificationId, {
     type: 'basic',
     iconUrl: '/icon/48.png' as PublicPath,
@@ -76,11 +67,8 @@ async function sendNotification(stateManager: StateManager, feed: EmailThread) {
 }
 
 export default defineBackground(() => {
-  // A throw anywhere in start() aborts every registration after it -
-  // this is the only thing standing between that and total silence (the
-  // idle API being unsupported on Safari did exactly this: everything
-  // after browser.idle.onStateChanged.addListener() - the alarm, the
-  // startup fetch - just never ran, with no error visible anywhere).
+  // A throw anywhere in start() aborts every registration after it, with
+  // no error visible anywhere unless it's logged here.
   start().then(
     () => debugLog('background: startup complete'),
     (err) => debugLog('background: startup failed ->', err),
@@ -96,7 +84,7 @@ export default defineBackground(() => {
 async function start() {
   // One listener for every notification; adding one per notification piled
   // them up, so each click ran every earlier one too.
-  browser.notifications?.onClicked.addListener(async (id) => {
+  browser.notifications.onClicked.addListener(async (id) => {
     if (!id.startsWith('mailbell-')) return
     await browser.notifications.clear(id)
     await browser.action.openPopup()
@@ -132,16 +120,8 @@ async function start() {
   browser.runtime.onConnect.addListener(async (port) => {
     if (port.name === 'popup') {
       await debugLog('background: popup port connected')
-      // Guard against double-registration: this port disconnects and
-      // reconnects often on Safari (seen throughout this file's debugLog
-      // history). Registering a fresh closure unconditionally on every
-      // connect meant that if a new connect fired before the previous
-      // disconnect's cleanup below had run, two listeners briefly coexisted
-      // - every notify() then pushed 'refreshPopup' twice in a row, visible
-      // as the mail list flickering/re-rendering right when the popup
-      // opens. Reusing one stable function reference plus this guard keeps
-      // at most one registered at a time regardless of connect/disconnect
-      // ordering.
+      // At most one registered: a new connect can land before the previous
+      // disconnect's cleanup, and two listeners pushed every refresh twice.
       if (!popupListenerRegistered) {
         stateManager.on(pushRefreshToPopup)
         popupListenerRegistered = true
@@ -169,33 +149,14 @@ async function start() {
       await stateManager.fetchThreads()
     }
   })
-  // Safari doesn't support the idle API at all (confirmed by the "idle" key
-  // warning wxt/extport prints when converting the Safari build) - accessing
-  // browser.idle there throws synchronously and, since this whole callback
-  // is one async function, silently aborted every registration after it:
-  // no alarm, no startup fetch, nothing - with zero indication why.
-  if (browser.idle) {
-    browser.idle.onStateChanged.addListener(async (state) => {
-      if (state === 'active') {
-        const alarms = await browser.alarms.get('fetchThreads')
-        if (!alarms) {
-          await browser.alarms.create('fetchThreads', { periodInMinutes: 0.5 })
-        }
-      } else {
-        await browser.alarms.clear('fetchThreads')
-      }
-    })
-  } else {
-    void debugLog(
-      'background: browser.idle unsupported, skipping idle-based alarm management',
-    )
-  }
-  globalThis.addEventListener('online', async () => {
-    const alarms = await browser.alarms.get('fetchThreads')
-    if (!alarms) {
-      await browser.alarms.create('fetchThreads', { periodInMinutes: 0.5 })
+  browser.idle.onStateChanged.addListener(async (state) => {
+    if (state === 'active') {
+      await ensureAlarm()
+    } else {
+      await browser.alarms.clear('fetchThreads')
     }
   })
+  globalThis.addEventListener('online', ensureAlarm)
   globalThis.addEventListener('offline', () => {
     browser.alarms.clear('fetchThreads')
   })
@@ -214,6 +175,17 @@ async function start() {
   bgMessager.onMessage('removeAccount', async ({ data: email }) => {
     await removeAccount(email)
     await clearInboxCache(email)
+    await stateManager.refresh()
+  })
+  // Refresh tokens belong to the client that issued them: switching signs
+  // every account out, revoked and with its cache gone, like removing it.
+  bgMessager.onMessage('setOAuthClient', async ({ data: client }) => {
+    const accounts = await getAccounts()
+    await setCustomClient(client)
+    for (const { email } of accounts) {
+      await removeAccount(email)
+      await clearInboxCache(email)
+    }
     await stateManager.refresh()
   })
   bgMessager.onMessage('unsubscribe', async ({ data: url }) => {
@@ -289,63 +261,14 @@ async function start() {
     throw new Error('Unknown menu item id: ' + info.menuItemId)
   })
 
-  // Fire-and-forget: don't let alarms.create() block the actual mail fetch
-  // below. Can't assume it returns a real Promise either - on Safari it
-  // returned undefined, and chaining .then() on that threw and took down
-  // the rest of startup with it.
-  await debugLog('background: starting up')
-  await debugLog('background: creating fetchThreads alarm')
-  try {
-    const created = browser.alarms.create('fetchThreads', {
-      periodInMinutes: 0.5,
-    })
-    if (
-      created &&
-      typeof (created as unknown as Promise<void>).then === 'function'
-    ) {
-      ;(created as unknown as Promise<void>).then(
-        () => debugLog('background: fetchThreads alarm created'),
-        (err) =>
-          debugLog('background: fetchThreads alarm creation failed ->', err),
-      )
-    } else {
-      await debugLog(
-        'background: fetchThreads alarm create() returned a non-promise, assuming it succeeded',
-      )
-    }
-  } catch (err) {
-    await debugLog('background: fetchThreads alarm creation threw ->', err)
-  }
-  await debugLog('background: running startup fetchThreads')
-  await fetchThreadsWithRetry(stateManager)
+  // A failed startup fetch (network not up yet after waking) is retried by
+  // the alarm half a minute later.
+  await browser.alarms.create('fetchThreads', { periodInMinutes: 0.5 })
+  await stateManager.fetchThreads()
 }
 
-// The network isn't always up the instant the browser starts the background
-// (waking from sleep, captive portals). Retry a few times instead of giving
-// up after one attempt right at cold start.
-async function fetchThreadsWithRetry(
-  stateManager: StateManager,
-  attempts = 3,
-  delayMs = 1500,
-) {
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    try {
-      await stateManager.fetchThreads()
-      await debugLog(
-        `background: startup fetchThreads succeeded on attempt ${attempt}`,
-      )
-      return
-    } catch (err) {
-      await debugLog(
-        `background: startup fetchThreads attempt ${attempt}/${attempts} failed ->`,
-        err,
-      )
-      if (attempt < attempts) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs))
-      }
-    }
+async function ensureAlarm() {
+  if (!(await browser.alarms.get('fetchThreads'))) {
+    await browser.alarms.create('fetchThreads', { periodInMinutes: 0.5 })
   }
-  await debugLog(
-    `background: startup fetchThreads gave up after ${attempts} attempts`,
-  )
 }

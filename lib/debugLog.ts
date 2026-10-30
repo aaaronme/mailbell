@@ -20,11 +20,9 @@ function hasBrowser() {
   return 'browser' in globalThis || 'chrome' in globalThis
 }
 
-// Safari's Web Inspector doesn't reliably surface console output from
-// extension background/popup contexts, and drops anything logged before the
-// inspector was opened. Persist a rolling log buffer to storage.local (shared
-// across every context, survives service worker restarts) so it can still be
-// read after the fact.
+// The background's console only shows what was logged while a devtools window
+// was open. Keep a rolling buffer in storage.local (shared across contexts,
+// survives background restarts) so it can be read after the fact.
 export async function debugLog(...args: unknown[]) {
   console.log(...args)
   if (!hasBrowser()) {

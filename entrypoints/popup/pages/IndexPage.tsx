@@ -132,12 +132,9 @@ function Toolbar() {
   const mailQuery = useMailQuery()
   const queryClient = useQueryClient()
   const refreshMutation = useMutation({
-    // Don't rely solely on background's 'refreshPopup' push to update this
-    // view - that only reaches us if our keepalive port happens to still be
-    // connected the instant background finishes (it disconnects/reconnects
-    // often on Safari), so a message landing mid-gap is silently lost and
-    // the button does nothing until the popup is closed and reopened. Pull
-    // directly once our own request is known to have completed instead.
+    // Don't rely solely on background's 'refreshPopup' push: it's lost if the
+    // keepalive port is reconnecting at that instant. Pull once our own
+    // request has completed.
     mutationFn: async () => {
       await bgMessager.sendMessage('refreshThreads', undefined)
       await queryClient.invalidateQueries({ queryKey: mailQueryKey })
@@ -221,16 +218,7 @@ function Toolbar() {
         </DropdownMenuTrigger>
         <DropdownMenuContent align={'end'}>
           <DropdownMenuItem asChild>
-            {/* Not a hardcoded chrome-extension:// URL: Safari's own
-                extension resources live under safari-web-extension://, not
-                chrome-extension://, so that scheme opened a blank tab there
-                (the browser doesn't recognize it). getURL() returns
-                whatever scheme+id the current browser actually uses.
-
-                The ?view=tab marker is what main.tsx reads to skip applying
-                either fixed-size popup class - a standalone tab should
-                never be size-constrained the way the actual toolbar popup
-                needs to be. */}
+            {/* ?view=tab tells main.tsx not to pin the popup width. */}
             <a href={browser.runtime.getURL('/popup.html?view=tab')} target="_blank">
               <SquareArrowOutUpRightIcon />
               Popout

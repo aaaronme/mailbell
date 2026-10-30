@@ -16,8 +16,6 @@ export interface GmailApi {
   archive: (url: string) => Promise<void>
   delete: (url: string) => Promise<void>
   markAsSpam: (url: string) => Promise<void>
-  // star: (url: string) => Promise<void>
-  // unstar: (url: string) => Promise<void>
 }
 
 // persistent service worker
@@ -42,12 +40,8 @@ export class StateManager {
 
   private async notify() {
     await this.restored
-    // storage.local, not storage.session: session storage only reached
-    // Safari in 16.4 and has been reported flaky there since (Apple dev
-    // forum threads on storage.session/storage.local both returning
-    // stale/undefined data). local is universally reliable across every
-    // target browser, and persisting across restarts is fine here - the
-    // popup would rather show last-known state than nothing.
+    // storage.local, not session: the popup would rather show last-known
+    // state after a restart than nothing.
     await browser.storage.local.set({
       isLoggedIn: this.isLoggedIn,
       accounts: this.accounts,
@@ -57,7 +51,7 @@ export class StateManager {
       // Isolate each listener: this loop fans out to independent concerns
       // (badge update, notification, pushing 'refreshPopup' to the popup) -
       // one of them failing (e.g. pushing to the popup when its message
-      // channel is in a bad state, seen on Safari) must not abort the rest
+      // channel is in a bad state) must not abort the rest
       // or propagate back to notify()'s caller. Without this, a single
       // listener failing here turned mundane actions like markAsRead into
       // an apparent failure for the caller - the mutation itself (in-memory

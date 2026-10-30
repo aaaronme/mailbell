@@ -4,105 +4,19 @@ import './style.css'
 import { debugLog } from '@/lib/debugLog'
 import { isPopoutTab } from './view'
 
-// Root cause of a whole cluster of Safari-only extension-popup bugs, found
-// the hard way over one long debugging session (each looked unrelated until
-// they didn't):
-//   - No elastic/momentum scroll physics on scrollable content (unlike a
-//     normal Safari tab or the Chrome popup, both fine)
-//   - prefers-color-scheme sometimes not detected - popup rendered light
-//     while the exact same build, same OS appearance, rendered dark in a
-//     normal tab
-//   - The tab behind the popup, blurred, briefly visible THROUGH the popup
-//     (Safari's native vibrancy/blur-behind material showing through
-//     wherever nothing opaque had painted over it yet)
-//   - Scroll position not resetting when navigating between routes -
-//     confirmed live via DevTools that documentElement.scrollTop simply
-//     stayed at its old value after a route change
-//
-// All four traced back to the same trigger: the popup's native window
-// auto-resizing to match content height as it changes (switching routes,
-// long email threads, etc). WebKit's own Safari 26.2 changelog
-// (https://webkit.org/blog/17640/webkit-features-for-safari-26-2/) even
-// acknowledges "extension popups could open scrolled down and some
-// websites could flicker during scrolling" as a real, only-recently-fixed
-// bug class here - this isn't a one-off, it's a known rough edge in how
-// Safari's popup WKWebView synchronizes its native window with content.
-//
-// The fix - confirmed live, all four symptoms gone - is to never let the
-// window resize at all: pin it to one fixed size up front, before React
-// renders anything, so every route fits inside the same frame regardless of
-// its own content height. See style.css's `.safari-fixed-popup` rule for
-// the actual dimensions - body scrolls directly there (not a nested
-// overflow-auto div per page), which is also what restores proper
-// elastic/momentum physics: that's document-level scroll, the same kind a
-// normal tab gets, not the nested-div scroll that was one of the four
-// symptoms above.
-//
-// Chrome/Firefox don't have Safari's whole bug cluster from auto-resizing,
-// so the full fixed-size treatment below is scoped to Safari only. They
-// still auto-size the popup horizontally to fit content, though - a long
-// unbroken subject line or email address can widen it unexpectedly - so
-// they get a width-only fix instead. See style.css's `.safari-fixed-popup`
-// and `.fixed-width-popup` rules for the actual dimensions.
-//
-// Neither should ever apply to the "Popout" link's standalone tab (see
-// IndexPage) - a real tab has no reason to be size-constrained the way the
-// actual toolbar popup does, so that link marks itself with ?view=tab and
-// both branches below skip if it's set.
-//
-// Set as early as possible, before the first paint, so Safari never sees an
-// unpinned frame even for a moment.
-
-// Diagnostic for the click-kills-the-popup bug: the background log showed the
-// popup page being torn down at the instant a mail row is clicked (port
-// disconnect, then a brand-new page connecting ~0.5s later and sending its
-// once-per-session refreshThreads). The navigation entry's type tells the two
-// candidate causes apart from inside the *new* page: 'reload' means the old
-// page reloaded itself via location.reload(), while 'navigate' covers both a
-// real (same-URL) navigation and the popup view being destroyed and recreated
-// from scratch (renderer death) - observed value so far is always 'navigate',
-// so the beacon below is what tells those last two apart.
-//
-// The pagehide beacon: a graceful teardown (normal close, real navigation)
-// fires pagehide; a renderer crash does not. A single storage.local.set with
-// no prior read, because a read-modify-write (what debugLog does) has two
-// async hops and loses the race against the document being destroyed. The
-// next page load reports the previous beacon - if the popup died at a click
-// but the beacon's timestamp is from an older, normal close, the death was
-// not graceful.
-window.addEventListener('pagehide', () => {
-  void browser.storage.local.set({ lastPagehide: new Date().toISOString() })
-})
-void (async () => {
-  const { lastPagehide } = await browser.storage.local.get<{ lastPagehide?: string }>('lastPagehide')
-  await debugLog('popup: page loaded ->', {
-    navType: (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.type,
-    view: isPopoutTab ? 'tab' : 'popup',
-    prevPagehide: lastPagehide ?? null,
-  })
-})()
+// The toolbar popup sizes itself to its content, so a long unbroken subject
+// or address can widen it: pin the width (style.css). The Popout tab isn't
+// constrained.
 if (!isPopoutTab) {
-  if (import.meta.env.SAFARI) {
-    document.documentElement.classList.add('safari-fixed-popup')
-  } else {
-    document.documentElement.classList.add('fixed-width-popup')
-  }
+  document.documentElement.classList.add('fixed-width-popup')
 }
 
 const root = ReactDOM.createRoot(document.getElementById('root')!)
 root.render(<App />)
 
-// Send a periodic heartbeat to keep the service worker alive. Some browsers
-// (seen on Safari) can tear down the service worker - and this port with it -
-// while the popup is still open, so reconnect instead of leaving the
-// interval throwing on a dead port forever.
-//
-// The reconnect is deliberately delayed rather than immediate: on Safari the
-// port can disconnect instantly (before the service worker has a chance to
-// do anything), and reconnecting synchronously turned this into a tight
-// connect/disconnect loop that appeared to be starving the service worker of
-// any window to actually run - hundreds of connects/sec, zero completed
-// fetches. A gap between attempts matters more here than fast recovery.
+// Heartbeat to keep the background alive while the popup is open. If the
+// background is torn down anyway, reconnect after a gap: reconnecting at once
+// can spin into a tight connect/disconnect loop.
 const RECONNECT_DELAY_MS = 2000
 
 function connectToServiceWorker() {

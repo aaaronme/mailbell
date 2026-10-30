@@ -17,8 +17,7 @@ function AppContent() {
     // snapshot" pull needed. This only needs to (a) invalidate the query
     // when background pushes 'refreshPopup', so any mounted useMailQuery
     // re-reads storage, and (b) kick off an actual fresh remote fetch,
-    // since background's own alarm/webRequest triggers only run on their
-    // own schedule and without this the popup can sit on stale data until
+    // since background's own alarm only runs on its own schedule and without this the popup can sit on stale data until
     // one of those fires.
     popupMessager.onMessage('refreshPopup', () => {
       queryClient.invalidateQueries({ queryKey: mailQueryKey })

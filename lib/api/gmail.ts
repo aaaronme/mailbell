@@ -109,7 +109,7 @@ export function composeUrl(account: string, params: Record<string, string> = {})
 
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me'
 
-export class GmailApiError extends Error {
+class GmailApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
@@ -118,7 +118,7 @@ export class GmailApiError extends Error {
   }
 }
 
-export async function gmailFetch<T>(account: string, path: string, init: RequestInit = {}): Promise<T> {
+async function gmailFetch<T>(account: string, path: string, init: RequestInit = {}): Promise<T> {
   const send = async (token: string) =>
     fetch(`${API}${path}`, {
       ...init,
@@ -128,15 +128,13 @@ export async function gmailFetch<T>(account: string, path: string, init: Request
         ...init.headers,
       },
     })
-  let resp = await send(await getAccessToken(account))
-  // The stored token can be revoked or expire early; one forced refresh.
+  const token = await getAccessToken(account)
+  let resp = await send(token)
+  // The token can be revoked or expire early. A parallel request may already
+  // have refreshed it; only force a refresh if the stored one is unchanged.
   if (resp.status === 401) {
-    resp = await send(await getAccessToken(account, true))
-  }
-  // Per-user rate limit: back off once.
-  if (resp.status === 429) {
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    resp = await send(await getAccessToken(account))
+    const stored = await getAccessToken(account)
+    resp = await send(stored !== token ? stored : await getAccessToken(account, true))
   }
   if (!resp.ok) {
     const text = await resp.text().catch(() => '')
@@ -162,7 +160,7 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 
 // --- Gmail API shapes (only the fields used) --------------------------------
 
-export interface GmailHeader {
+interface GmailHeader {
   name: string
   value: string
 }
@@ -194,14 +192,17 @@ export interface GmailThread {
 
 // --- MIME -> ThreadMail ------------------------------------------------------
 
-export function header(part: GmailPart, name: string): string | undefined {
+function header(part: GmailPart, name: string): string | undefined {
   const lower = name.toLowerCase()
   return part.headers?.find((h) => h.name.toLowerCase() === lower)?.value
 }
 
+// The API's base64url, as the standard alphabet atob and data: URIs take.
+const toBase64 = (data: string) => data.replace(/-/g, '+').replace(/_/g, '/')
+const base64UrlToBytes = (data: string) => Uint8Array.from(atob(toBase64(data)), (c) => c.charCodeAt(0))
+
 export function decodeBase64Url(data: string, charset = 'utf-8'): string {
-  const binary = atob(data.replace(/-/g, '+').replace(/_/g, '/'))
-  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0))
+  const bytes = base64UrlToBytes(data)
   try {
     return new TextDecoder(charset).decode(bytes)
   } catch {
@@ -264,7 +265,7 @@ function plainTextToHtml(text: string): string {
 
 // The body's markup without its document wrapper, the <style> sheets it
 // carried, and its visible text.
-export function prepareHtml(html: string): { contentHtml: string; contentText: string; styles: string[] } {
+function prepareHtml(html: string): { contentHtml: string; contentText: string; styles: string[] } {
   const doc = parse(html)
   const styles = querySelectorAll('style', doc)
     .map((style) => getTextContent(style)?.trim() || '')
@@ -296,9 +297,10 @@ export function prepareHtml(html: string): { contentHtml: string; contentText: s
 
 // What a message needs fetched separately: inline images (cid:) whose bytes
 // live behind an attachmentId.
-export interface InlineImage {
+interface InlineImage {
   contentId: string
   mimeType: string
+  size: number
   attachmentId?: string
   data?: string
 }
@@ -358,12 +360,18 @@ export function messageToMail(
   return { message, styles: body.styles }
 }
 
-export function inlineImagesOf(msg: GmailMessage): InlineImage[] {
+function inlineImagesOf(msg: GmailMessage): InlineImage[] {
   const images: InlineImage[] = []
   walk(msg.payload, (part) => {
     const contentId = header(part, 'Content-ID')?.replace(/^<|>$/g, '')
     if (contentId && part.mimeType.startsWith('image/')) {
-      images.push({ contentId, mimeType: part.mimeType, attachmentId: part.body?.attachmentId, data: part.body?.data })
+      images.push({
+        contentId,
+        mimeType: part.mimeType,
+        size: part.body?.size ?? 0,
+        attachmentId: part.body?.attachmentId,
+        data: part.body?.data,
+      })
     }
   })
   return images
@@ -400,27 +408,29 @@ export function threadToMail(thread: GmailThread, inlineData: Map<string, string
   }
 }
 
-// Inline images bigger than this stay broken rather than bloat storage.
+// Inline images bigger than this stay broken rather than bloat storage (and
+// aren't downloaded at all).
 const MAX_INLINE_IMAGE_BYTES = 1_000_000
 
 async function fetchInlineData(account: string, thread: GmailThread): Promise<Map<string, string>> {
   const data = new Map<string, string>()
   for (const msg of visibleMessages(thread)) {
     for (const image of inlineImagesOf(msg)) {
+      if (image.size > MAX_INLINE_IMAGE_BYTES) continue
       let b64 = image.data
       if (!b64 && image.attachmentId) {
-        const att = await gmailFetch<{ size: number; data: string }>(
+        const att = await gmailFetch<{ data: string }>(
           account,
           `/messages/${msg.id}/attachments/${image.attachmentId}`,
         ).catch((err) => {
           void debugLog('inline image failed ->', image.contentId, err)
           return null
         })
-        if (!att || att.size > MAX_INLINE_IMAGE_BYTES) continue
+        if (!att) continue
         b64 = att.data
       }
       if (b64) {
-        data.set(image.contentId, `data:${image.mimeType};base64,${b64.replace(/-/g, '+').replace(/_/g, '/')}`)
+        data.set(image.contentId, `data:${image.mimeType};base64,${toBase64(b64)}`)
       }
     }
   }
@@ -447,17 +457,29 @@ interface InboxCache {
 // cache would be empty on nearly every wake-up and re-download the inbox.
 const inboxCacheKey = (account: string) => `inbox:${account}`
 
+// Mirrored in memory for the life of the background: a fresh one reads each
+// account's cache once instead of once per thread it builds.
+const inboxCaches = new Map<string, InboxCache>()
+
 async function readInboxCache(account: string): Promise<InboxCache | null> {
+  const memo = inboxCaches.get(account)
+  if (memo) return memo
   const key = inboxCacheKey(account)
   const { [key]: cache } = await browser.storage.local.get<Record<string, InboxCache>>(key)
+  if (cache) inboxCaches.set(account, cache)
   return cache ?? null
 }
 
 async function writeInboxCache(account: string, cache: InboxCache) {
+  // A poll still in flight when its account was removed must not bring the
+  // cache back.
+  if (!(await getAccounts()).some((it) => it.email === account)) return
+  inboxCaches.set(account, cache)
   await browser.storage.local.set({ [inboxCacheKey(account)]: cache })
 }
 
 export async function clearInboxCache(account: string) {
+  inboxCaches.delete(account)
   await browser.storage.local.remove(inboxCacheKey(account))
 }
 
@@ -475,7 +497,7 @@ async function buildCachedThread(account: string, thread: GmailThread): Promise<
   }
 }
 
-export async function getInbox(account: string): Promise<RSSInfo> {
+async function getInbox(account: string): Promise<RSSInfo> {
   const profile = await gmailFetch<{ historyId: string }>(account, '/profile')
   const cache = await readInboxCache(account)
   const cacheUsable = cache?.order.every((id) => cache.threads[id]?.mail.extractVersion === CURRENT_EXTRACT_VERSION)
@@ -578,8 +600,7 @@ export async function getAttachmentBlob(account: string, attachment: Attachment)
     account,
     `/messages/${attachment.messageId}/attachments/${attachment.attachmentId}`,
   )
-  const binary = atob(data.replace(/-/g, '+').replace(/_/g, '/'))
-  return new Blob([Uint8Array.from(binary, (c) => c.charCodeAt(0))], { type: attachment.mimeType })
+  return new Blob([base64UrlToBytes(data)], { type: attachment.mimeType })
 }
 
 // --- Opening Gmail ---------------------------------------------------------

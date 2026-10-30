@@ -190,7 +190,7 @@ describe('StateManager', () => {
     it('markAsRead still resolves and keeps the mutation when a listener throws', async () => {
       // Regression test: notify() fans out to independent listeners (badge
       // update, push a refresh to the popup, etc). One of them failing (a
-      // real case on Safari: pushing to the popup when its message channel
+      // e.g. pushing to the popup when its message channel
       // is in a bad state) used to abort the whole notify() call and
       // propagate back to the caller - turning a successful mutation into
       // an apparent failure (surfaced as an error toast for markAllAsRead,

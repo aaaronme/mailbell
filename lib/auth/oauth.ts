@@ -9,7 +9,7 @@ import { debugLog } from '../debugLog'
 // secret at the token endpoint even with PKCE; an extension cannot keep a
 // secret, and Google treats it as non-confidential for installed apps.
 
-export const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.modify'
+const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.modify'
 const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth'
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
 const REVOKE_ENDPOINT = 'https://oauth2.googleapis.com/revoke'
@@ -53,8 +53,8 @@ export async function getClient(): Promise<OAuthClient | null> {
   return (await getCustomClient()) ?? getBuiltInClient()
 }
 
-// Refresh tokens belong to the client that issued them, so switching clients
-// signs every account out.
+// Refresh tokens belong to the client that issued them: the caller signs every
+// account out after switching (background's setOAuthClient).
 export async function setCustomClient(client: OAuthClient | null): Promise<void> {
   if (client?.clientId.trim()) {
     await browser.storage.local.set({
@@ -63,7 +63,6 @@ export async function setCustomClient(client: OAuthClient | null): Promise<void>
   } else {
     await browser.storage.local.remove(CLIENT_KEY)
   }
-  await saveAccounts([])
 }
 
 export async function getAccounts(): Promise<Account[]> {
@@ -71,19 +70,30 @@ export async function getAccounts(): Promise<Account[]> {
   return accounts ?? []
 }
 
-async function saveAccounts(accounts: Account[]): Promise<void> {
-  await browser.storage.local.set({ [ACCOUNTS_KEY]: accounts })
+// Every change to the account list is a read-modify-write of one key, and two
+// accounts refresh concurrently during a poll: queue them, or the second
+// write drops the first one's new token.
+let accountWrites: Promise<unknown> = Promise.resolve()
+function updateAccounts(fn: (accounts: Account[]) => Account[]): Promise<Account[]> {
+  const next = accountWrites.then(async () => {
+    const accounts = fn(await getAccounts())
+    await browser.storage.local.set({ [ACCOUNTS_KEY]: accounts })
+    return accounts
+  })
+  accountWrites = next.catch(() => {})
+  return next
 }
 
-async function updateAccount(email: string, patch: Partial<Account>): Promise<void> {
-  const accounts = await getAccounts()
-  await saveAccounts(accounts.map((it) => (it.email === email ? { ...it, ...patch } : it)))
+function updateAccount(email: string, patch: Partial<Account>) {
+  return updateAccounts((accounts) => accounts.map((it) => (it.email === email ? { ...it, ...patch } : it)))
 }
 
 export async function removeAccount(email: string): Promise<void> {
-  const accounts = await getAccounts()
-  const account = accounts.find((it) => it.email === email)
-  await saveAccounts(accounts.filter((it) => it.email !== email))
+  let account: Account | undefined
+  await updateAccounts((accounts) => {
+    account = accounts.find((it) => it.email === email)
+    return accounts.filter((it) => it.email !== email)
+  })
   if (account) {
     // Best effort: the local sign-out already happened either way.
     await fetch(`${REVOKE_ENDPOINT}?token=${encodeURIComponent(account.refreshToken)}`, { method: 'POST' }).catch(
@@ -175,7 +185,8 @@ export async function signIn(loginHint?: string): Promise<Account> {
     url: buildAuthUrl(client, redirectUri, challenge, state, loginHint),
     interactive: true,
   })
-  const params = new URL(result!).searchParams
+  if (!result) throw new OAuthError('cancelled')
+  const params = new URL(result).searchParams
   if (params.get('state') !== state) throw new OAuthError('state_mismatch')
   const code = params.get('code')
   if (!code) throw new OAuthError(params.get('error') ?? 'no_code')
@@ -192,8 +203,7 @@ export async function signIn(loginHint?: string): Promise<Account> {
     accessToken: token.access_token,
     expiresAt: Date.now() + token.expires_in * 1000,
   }
-  const others = (await getAccounts()).filter((it) => it.email !== account.email)
-  await saveAccounts([...others, account])
+  await updateAccounts((accounts) => [...accounts.filter((it) => it.email !== account.email), account])
   return account
 }
 

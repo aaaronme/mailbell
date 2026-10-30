@@ -6,9 +6,8 @@ import { ArrowLeftIcon, CopyIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { bgMessager } from '@/lib/messager'
-import { getBuiltInClient, getCustomClient, setCustomClient } from '@/lib/auth/oauth'
-import { accountsQueryKey, useAccounts } from '@/lib/useAccounts'
-import { mailQueryKey } from '@/lib/useMailQuery'
+import { getBuiltInClient, getCustomClient } from '@/lib/auth/oauth'
+import { useAccounts } from '@/lib/useAccounts'
 
 const clientQueryKey = ['oauthClient']
 
@@ -40,8 +39,7 @@ function AccountsSection() {
 
   async function remove(email: string) {
     await bgMessager.sendMessage('removeAccount', email)
-    await queryClient.invalidateQueries({ queryKey: accountsQueryKey })
-    await queryClient.invalidateQueries({ queryKey: mailQueryKey })
+    await queryClient.invalidateQueries()
   }
 
   return (
@@ -85,11 +83,8 @@ function ClientSection() {
   const hasBuiltIn = !!getBuiltInClient()
 
   async function save(next: { clientId: string; clientSecret: string } | null) {
-    await setCustomClient(next)
-    await bgMessager.sendMessage('refreshThreads', undefined)
-    await Promise.all(
-      [clientQueryKey, accountsQueryKey, mailQueryKey].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
-    )
+    await bgMessager.sendMessage('setOAuthClient', next)
+    await queryClient.invalidateQueries()
     toast.success('OAuth client saved')
   }
 

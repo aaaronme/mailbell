@@ -54,11 +54,19 @@ describe('tokens', () => {
     vi.stubGlobal('browser', fakeBrowser)
   })
 
-  it('a custom client overrides the built-in one, and switching signs everyone out', async () => {
-    await fakeBrowser.storage.local.set({ oauthAccounts: [ACCOUNT] })
+  it('a custom client overrides the built-in one', async () => {
     await setCustomClient({ clientId: ' other ', clientSecret: '' })
     expect(await getClient()).toEqual({ clientId: 'other', clientSecret: undefined })
-    expect(await getAccounts()).toEqual([])
+  })
+
+  it("concurrent refreshes of two accounts keep both accounts' tokens", async () => {
+    await fakeBrowser.storage.local.set({ oauthAccounts: [ACCOUNT, { ...ACCOUNT, email: 'b@gmail.com', refreshToken: 'r2' }] })
+    fetchMock.mockImplementation(async (_url: string, init: RequestInit) => {
+      const refresh = (init.body as URLSearchParams).get('refresh_token')
+      return Response.json({ access_token: `new-${refresh}`, expires_in: 3600 })
+    })
+    await Promise.all([getAccessToken('me@gmail.com'), getAccessToken('b@gmail.com')])
+    expect((await getAccounts()).map((it) => it.accessToken)).toEqual(['new-r1', 'new-r2'])
   })
 
   it('returns a fresh token without a request', async () => {

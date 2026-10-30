@@ -49,14 +49,9 @@ describe('IndexPage', () => {
 
   it('refresh button pulls fresh state directly instead of depending solely on the background push', async () => {
     // Regression test: the refresh button used to only send 'refreshThreads'
-    // and wait for background's 'refreshPopup' push to update the view. On
-    // Safari that push is delivered over the popup's keepalive port, which
-    // disconnects/reconnects often - a push landing mid-gap was silently
-    // lost, so the button visibly did nothing until the popup was closed
-    // and reopened. This mock simulates exactly that: background finishes
-    // the fetch and writes fresh state to storage, but never emits any
-    // popupMessager message - the click handler must invalidate/pull the
-    // fresh state itself to pass.
+    // and wait for background's 'refreshPopup' push, which is lost if the
+    // keepalive port is reconnecting at that instant. This mock writes fresh
+    // state to storage but never pushes: the click handler must pull it.
     await browser.storage.local.set({ accounts: ['me@example.com'], threads: [makeThread('a')] })
     vi.spyOn(bgMessager, 'sendMessage').mockImplementation(async () => {
       await browser.storage.local.set({ accounts: ['me@example.com'], threads: [makeThread('b')] })
