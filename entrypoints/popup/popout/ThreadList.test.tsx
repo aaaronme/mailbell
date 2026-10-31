@@ -11,6 +11,7 @@ vi.stubGlobal('chrome', fakeBrowser)
 const { createAppRouter } = await import('../router')
 const { setTokenSource } = await import('@/lib/api/gmail')
 const { rowDate } = await import('./ThreadListRow')
+const { threadUrl } = await import('@/lib/api/gmail')
 
 const A = 'a@example.com'
 
@@ -22,6 +23,8 @@ let failingAuth = ''
 // Thread ids whose snippet carries an HTML-entity dash after the word "code".
 let entityThreads: string[] = []
 let emptyList = false
+// Thread ids that come back unread.
+let unreadThreads: string[] = []
 // The second page repeats the first page's last thread, as after new mail.
 let overlap = false
 const listRequests: URL[] = []
@@ -47,7 +50,7 @@ function threadBody(id: string) {
   return {
     id,
     snippet,
-    messages: [{ id: `m${n}`, labelIds: ['INBOX'], snippet, internalDate: String(Date.now()), payload: { headers } }],
+    messages: [{ id: `m${n}`, labelIds: unreadThreads.includes(id) ? ['INBOX', 'UNREAD'] : ['INBOX'], snippet, internalDate: String(Date.now()), payload: { headers } }],
   }
 }
 
@@ -111,6 +114,7 @@ describe('ThreadList', () => {
     failingAuth = ''
     entityThreads = []
     emptyList = false
+    unreadThreads = []
     overlap = false
     stubFetch()
   })
@@ -272,6 +276,18 @@ describe('ThreadList', () => {
     await screen.getByRole('button', { name: 'Delete' }).click()
     await new Promise((r) => setTimeout(r, 300))
     await expect.element(screen.getByText('1 selected')).toBeInTheDocument()
+  })
+
+  // The open thread is about to be marked read; a dot that lingers for the
+  // delay only flickers.
+  it('shows no unread dot on the open row, unless marked unread there', async () => {
+    unreadThreads = ['t0', 't1']
+    const { screen } = await mount(`account=${A}&folder=INBOX&thread=${encodeURIComponent(threadUrl(A, 't0'))}&cat=primary`)
+    const dot = (id: string) => document.querySelector(`[data-row="${id}"] [aria-label="Unread"]`)
+    await vi.waitFor(() => expect(dot('t1')).not.toBeNull())
+    expect(dot('t0')).toBeNull()
+    await screen.getByTitle('Mark unread (Shift+U)').click()
+    await vi.waitFor(() => expect(dot('t0')).not.toBeNull())
   })
 
   it('shows the empty state', async () => {

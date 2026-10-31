@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeftIcon, PanelLeftIcon } from 'lucide-react'
@@ -65,9 +65,15 @@ export function MailRoute() {
     return () => browser.storage.onChanged.removeListener(onChanged)
   }, [queryClient])
   // Unknown until loaded: nothing is marked on a guess.
-  const { engage, keepUnread } = useMarkRead(useOpenThread(thread).data, settings?.markRead ?? 'manual')
+  const { engage, keepUnread: holdUnread } = useMarkRead(useOpenThread(thread).data, settings?.markRead ?? 'manual')
+  const [keptUnread, setKeptUnread] = useState<string>()
+  useEffect(() => setKeptUnread(undefined), [thread])
+  const keepUnread = useCallback(() => {
+    holdUnread()
+    setKeptUnread(thread)
+  }, [holdUnread, thread])
   const actions = useMailActions({ checked, onCheckedChange: setChecked, keepUnread })
-  const list = { actions, checked, onCheckedChange: setChecked, searchRef }
+  const list = { actions, checked, onCheckedChange: setChecked, searchRef, keptUnread }
   usePopoutShortcuts({
     rows,
     search,

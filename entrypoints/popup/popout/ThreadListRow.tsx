@@ -19,6 +19,7 @@ export function rowDate(iso: string, now: Date = new Date()): string {
 export function ThreadListRow({
   row,
   selected,
+  opened,
   checked,
   anyChecked,
   showAccount,
@@ -29,6 +30,9 @@ export function ThreadListRow({
 }: {
   row: ThreadRow
   selected: boolean
+  // Open and about to be marked read: shown read already, not flickering
+  // over the mark-read delay.
+  opened?: boolean
   checked: boolean
   // Keeps every checkbox visible once a selection has started.
   anyChecked?: boolean
@@ -38,7 +42,7 @@ export function ThreadListRow({
   onSelect(): void
   onCheck(shift: boolean): void
 }) {
-  const unread = row.labelIds.includes('UNREAD')
+  const unread = row.labelIds.includes('UNREAD') && !opened
   const starred = row.labelIds.includes('STARRED')
   const sentView = folder === 'SENT' || folder === 'DRAFT'
 

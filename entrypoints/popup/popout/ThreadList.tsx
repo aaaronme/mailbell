@@ -59,11 +59,14 @@ export function ThreadList({
   checked,
   onCheckedChange,
   searchRef,
+  keptUnread,
 }: {
   actions: MailActions
   checked: Set<string>
   onCheckedChange: (next: Set<string>) => void
   searchRef: React.RefObject<HTMLInputElement | null>
+  // The open thread the reader marked unread, which keeps its dot.
+  keptUnread?: string
 }) {
   const search = route.useSearch()
   const navigate = useNavigate({ from: '/mail' })
@@ -259,6 +262,7 @@ export function ThreadList({
             key={row.url}
             row={row}
             selected={row.url === thread}
+            opened={row.url === thread && row.url !== keptUnread}
             checked={checked.has(row.url)}
             anyChecked={targets.length > 0}
             showAccount={account === 'all'}
