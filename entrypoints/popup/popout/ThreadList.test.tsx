@@ -27,6 +27,8 @@ let emptyList = false
 let unreadThreads: string[] = []
 // The second page repeats the first page's last thread, as after new mail.
 let overlap = false
+// The thread list answers once this settles.
+let listGate: Promise<unknown> = Promise.resolve()
 const listRequests: URL[] = []
 const actionRequests: string[] = []
 
@@ -68,6 +70,7 @@ function stubFetch() {
       }
       if (path === '/threads') {
         listRequests.push(url)
+        await listGate
         if (emptyList) return json({})
         const second = url.searchParams.has('pageToken')
         const [from, count] = second ? (overlap ? [49, 11] : [50, 10]) : [0, 50]
@@ -115,6 +118,7 @@ describe('ThreadList', () => {
     entityThreads = []
     emptyList = false
     unreadThreads = []
+    listGate = Promise.resolve()
     overlap = false
     stubFetch()
   })
@@ -294,6 +298,16 @@ describe('ThreadList', () => {
     emptyList = true
     const { screen } = await mount()
     await expect.element(screen.getByText('Nothing here')).toBeInTheDocument()
+  })
+
+  it('says it is loading until the first rows arrive', async () => {
+    let open!: () => void
+    listGate = new Promise<void>((resolve) => (open = resolve))
+    const { screen } = await mount()
+    await expect.element(screen.getByText('Loading…')).toBeInTheDocument()
+    open()
+    await expect.element(screen.getByText('Subject 0', { exact: true })).toBeInTheDocument()
+    expect(screen.getByText('Loading…').elements()).toHaveLength(0)
   })
 
   it('an entity in the snippet is not read as a code', async () => {

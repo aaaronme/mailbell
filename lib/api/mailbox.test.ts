@@ -72,6 +72,17 @@ describe('mailbox api', () => {
     expect(list.searchParams.get('q')).toBe('-category:social -category:promotions')
   })
 
+  it('listThreadPage asks for a short first page, then full ones', async () => {
+    const query = { labelIds: ['INBOX'], includeSpamTrash: false }
+    await listThreadPage('me@gmail.com', query)
+    await listThreadPage('me@gmail.com', query, 'next')
+    const sizes = fetchMock.mock.calls
+      .map(([url]) => new URL(url))
+      .filter((it) => it.pathname.endsWith('/threads'))
+      .map((it) => it.searchParams.get('maxResults'))
+    expect(sizes).toEqual(['15', '50'])
+  })
+
   it('modifyThreads posts each thread', async () => {
     await modifyThreads('me@gmail.com', ['a', 'b'], ['INBOX'], [])
     const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')

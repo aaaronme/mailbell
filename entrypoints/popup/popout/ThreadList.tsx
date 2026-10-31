@@ -273,6 +273,9 @@ export function ThreadList({
           />
         ))}
         {hasNextPage && <div ref={sentinel} data-testid="thread-sentinel" className="h-px" />}
+        {(isPending || isFetchingNextPage) && (
+          <p className="p-6 text-center text-sm text-foreground/40">{isPending ? 'Loading…' : 'Loading more…'}</p>
+        )}
         {!isPending && !rows.length && !hasNextPage && (
           <p className="p-6 text-center text-sm text-foreground/40">{error ? "Couldn't load mail" : 'Nothing here'}</p>
         )}
