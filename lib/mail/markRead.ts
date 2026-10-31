@@ -8,7 +8,12 @@ const DELAY_MS = 2000
 
 // Marks the open thread read per the setting. A selection is a thread url:
 // leaving it and coming back starts over, but within one it is marked once.
-export function useMarkRead(thread: OpenThread | undefined, mode: Settings['markRead']): { engage(): void; keepUnread(): void } {
+export interface MarkRead {
+  engage(): void
+  keepUnread(): void
+}
+
+export function useMarkRead(thread: OpenThread | undefined, mode: Settings['markRead']): MarkRead {
   const latest = useRef(thread)
   latest.current = thread
   const marked = useRef<string | undefined>(undefined)

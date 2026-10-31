@@ -1,5 +1,3 @@
-import { queryOptions } from '@tanstack/react-query'
-
 // The user's preferences, one object in storage.local. Read by the popup's
 // Settings page and by the background on each poll and notification.
 
@@ -100,4 +98,6 @@ export function notificationSound(
 }
 
 // One query for every reader of the settings, so a write invalidates them all.
-export const settingsOptions = queryOptions({ queryKey: ['settings'], queryFn: getSettings })
+// A plain object, not queryOptions(): the background imports this module and
+// must not pull in react-query.
+export const settingsOptions = { queryKey: ['settings'] as const, queryFn: getSettings }
