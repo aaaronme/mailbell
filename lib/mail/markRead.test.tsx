@@ -17,8 +17,11 @@ describe('useMarkRead', () => {
   })
   afterEach(() => vi.useRealTimers())
 
-  const mount = (t: OpenThread | undefined, mode: 'delay' | 'immediate' | 'manual') =>
-    renderHook((p?: { t: OpenThread | undefined }) => useMarkRead(p!.t, mode), { initialProps: { t } })
+  type Mode = 'delay' | 'immediate' | 'manual'
+  const mount = (t: OpenThread | undefined, mode: Mode) =>
+    renderHook((p?: { t: OpenThread | undefined; mode: Mode }) => useMarkRead(p!.t, p!.mode), {
+      initialProps: { t, mode },
+    })
 
   it('marks read after 2000 ms in delay mode', async () => {
     await mount(thread('A'), 'delay')
@@ -34,7 +37,7 @@ describe('useMarkRead', () => {
   it('cancels when the thread changes first', async () => {
     const view = await mount(thread('A'), 'delay')
     vi.advanceTimersByTime(1500)
-    await view.rerender({ t: thread('B') })
+    await view.rerender({ mode: 'delay', t: thread('B') })
     vi.advanceTimersByTime(1999)
     expect(runSilent).not.toHaveBeenCalled()
     vi.advanceTimersByTime(1)
@@ -73,8 +76,37 @@ describe('useMarkRead', () => {
   it('treats selecting the same thread again as a new selection', async () => {
     const view = await mount(thread('A'), 'immediate')
     expect(runSilent).toHaveBeenCalledTimes(1)
-    await view.rerender({ t: undefined })
-    await view.rerender({ t: thread('A') })
+    await view.rerender({ mode: 'immediate', t: undefined })
+    await view.rerender({ mode: 'immediate', t: thread('A') })
     expect(runSilent).toHaveBeenCalledTimes(2)
+  })
+
+  it('starts the delay when settings arrive after the thread', async () => {
+    const view = await mount(thread('A'), 'manual')
+    vi.advanceTimersByTime(3000)
+    await view.rerender({ t: thread('A'), mode: 'delay' })
+    vi.advanceTimersByTime(1999)
+    expect(runSilent).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(runSilent).toHaveBeenCalledTimes(1)
+  })
+
+  it('tries again on the next engage after a failure', async () => {
+    vi.mocked(runSilent).mockRejectedValueOnce(new Error('offline'))
+    const view = await mount(thread('A'), 'manual')
+    await view.rerender({ t: thread('A'), mode: 'delay' })
+    vi.advanceTimersByTime(2000)
+    await vi.advanceTimersByTimeAsync(0)
+    view.result.current.engage()
+    expect(runSilent).toHaveBeenCalledTimes(2)
+  })
+
+  it('leaves a thread marked unread during the delay alone', async () => {
+    const view = await mount(thread('A'), 'delay')
+    vi.advanceTimersByTime(500)
+    view.result.current.keepUnread()
+    vi.advanceTimersByTime(5000)
+    view.result.current.engage()
+    expect(runSilent).not.toHaveBeenCalled()
   })
 })

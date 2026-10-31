@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ThreadRow } from '../api/mailbox'
 import { threadOptions } from './queries'
@@ -15,28 +15,34 @@ export function preloadTargets(rows: string[], selected: number): string[] {
   return [...new Set(picked)].filter((it): it is string => it !== undefined && it !== rows[selected])
 }
 
-// Warms the thread cache in the background, two requests at a time. Only reads.
+// Warms the thread cache in the background, two requests at a time across
+// target changes. Only reads.
 export function usePreload(rows: ThreadRow[], selectedUrl?: string) {
   const queryClient = useQueryClient()
   const key = useMemo(() => {
     const urls = rows.map((it) => it.url)
     return preloadTargets(urls, selectedUrl ? urls.indexOf(selectedUrl) : -1).join('\n')
   }, [rows, selectedUrl])
+  // In-flight requests outlive an effect run, so the count does too.
+  const pool = useRef({ active: 0, queue: [] as string[] })
 
   useEffect(() => {
-    if (!key) return
-    const queue = key.split('\n')
-    let cancelled = false
-    const worker = async () => {
-      for (let url = queue.shift(); url && !cancelled; url = queue.shift()) {
-        const options = threadOptions(url)
+    const state = pool.current
+    state.queue = key ? key.split('\n') : []
+    const pump = () => {
+      while (state.active < CONCURRENCY && state.queue.length) {
+        const options = threadOptions(state.queue.shift())
         if (queryClient.getQueryState(options.queryKey)?.data) continue
-        await queryClient.prefetchQuery(options)
+        state.active++
+        void queryClient.prefetchQuery(options).finally(() => {
+          state.active--
+          pump()
+        })
       }
     }
-    for (let i = 0; i < CONCURRENCY; i++) void worker()
+    pump()
     return () => {
-      cancelled = true
+      state.queue = []
     }
   }, [key, queryClient])
 }

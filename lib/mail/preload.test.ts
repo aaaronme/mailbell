@@ -88,6 +88,7 @@ describe('usePreload', () => {
     await vi.waitFor(() => expect(paths.length).toBe(2))
     await view.rerender({ rows: ids(30).map(row), selected: threadUrl(A, 't25') })
     for (let i = 0; i < 40; i++) await drain()
+    expect(peak).toBeLessThanOrEqual(2)
     expect(paths).toContain('GET /threads/t24')
     // Only the two already in flight finished from the old targets.
     expect(paths).not.toContain('GET /threads/t14')

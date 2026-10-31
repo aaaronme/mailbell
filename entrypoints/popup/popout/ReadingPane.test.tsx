@@ -17,6 +17,7 @@ const { setTokenSource, threadUrl } = await import('@/lib/api/gmail')
 const { runUndoable, runSilent } = await import('@/lib/mail/undo')
 
 const A = 'a@example.com'
+const B = 'b@example.com'
 let threadLabels = ['INBOX', 'UNREAD']
 let labels: object[] = []
 
@@ -25,9 +26,11 @@ const json = (body: object) => new Response(JSON.stringify(body))
 function stubFetch() {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: string) => {
+    vi.fn(async (input: string, init?: RequestInit) => {
+      const bearer = (init?.headers as Record<string, string> | undefined)?.Authorization
+      const asB = bearer === `Bearer ${B}`
       const path = new URL(input).pathname.replace(/^.*\/gmail\/v1\/users\/me/, '')
-      if (path === '/threads') return json({ threads: ['t0', 't1', 't2', 't3'].map((id) => ({ id })) })
+      if (path === '/threads') return json({ threads: (asB ? ['b0', 'b1'] : ['t0', 't1', 't2', 't3']).map((id) => ({ id })) })
       if (path.startsWith('/threads/')) {
         const id = path.slice('/threads/'.length)
         return json({
@@ -44,7 +47,11 @@ function stubFetch() {
           ],
         })
       }
-      if (path === '/labels') return json({ labels })
+      if (path === '/labels') return json({ labels: asB ? [{ id: 'Label_B', name: 'Clients', type: 'user' }] : labels })
+      if (path.startsWith('/labels/')) {
+        const id = path.slice('/labels/'.length)
+        return json([...labels, { id: 'Label_B', name: 'Clients', type: 'user' }].find((it) => (it as { id: string }).id === id) ?? {})
+      }
       return json({})
     }),
   )
@@ -75,7 +82,9 @@ describe('ReadingPane', () => {
     vi.mocked(runUndoable).mockClear()
     vi.mocked(runSilent).mockClear()
     vi.spyOn(fakeBrowser.identity, 'getRedirectURL').mockReturnValue('https://x.extensions.allizom.org/')
-    await browser.storage.local.set({ oauthAccounts: [{ email: A, refreshToken: 'r', accessToken: 't', expiresAt: 0 }] })
+    await browser.storage.local.set({
+      oauthAccounts: [A, B].map((email) => ({ email, refreshToken: 'r', accessToken: 't', expiresAt: 0 })),
+    })
     setTokenSource(async (account) => account)
     threadLabels = ['INBOX', 'UNREAD']
     labels = [
@@ -152,10 +161,39 @@ describe('ReadingPane', () => {
   })
 
   it('marks read when its scroll container scrolls', async () => {
+    await browser.storage.local.set({ settings: { markRead: 'delay' } })
     await mount(at('INBOX', 't1'))
     await vi.waitFor(() => expect(pane().textContent).toContain('Bob'))
     expect(runSilent).not.toHaveBeenCalled()
     pane().querySelector('[data-testid="reading-scroll"]')!.dispatchEvent(new Event('scroll'))
     await vi.waitFor(() => expect(runSilent).toHaveBeenCalledWith({ kind: 'read' }, expect.any(Array)))
+  })
+
+  it('labels checked rows with their own account labels in All inboxes', async () => {
+    const { screen } = await mount(
+      `account=all&folder=INBOX&thread=${encodeURIComponent(threadUrl(A, 't1'))}&cat=primary`,
+    )
+    await vi.waitFor(() => expect(document.querySelector('[data-row="b0"]')).not.toBeNull())
+    for (const id of ['b0', 'b1']) document.querySelector<HTMLElement>(`[data-row="${id}"] input`)!.click()
+    await vi.waitFor(() => expect(document.body.textContent).toContain('2 selected'))
+    await screen.getByTitle('Label as (l)').click()
+    await vi.waitFor(() => expect(document.querySelector('[role="menuitem"]')?.textContent).toBe('Clients'))
+    await page.getByRole('menuitem', { name: 'Clients' }).click()
+    expect(runUndoable).toHaveBeenCalledWith(
+      { kind: 'label', labelId: 'Label_B', name: 'Clients' },
+      ['b0', 'b1'].map((id) => ({ account: B, threadId: id, url: threadUrl(B, id) })),
+    )
+  })
+
+  it('does not move the selection if the user opened another thread meanwhile', async () => {
+    const gate = Promise.withResolvers<boolean>()
+    vi.mocked(runUndoable).mockImplementationOnce(() => gate.promise)
+    const { screen, router } = await mount(at('INBOX', 't1'))
+    await vi.waitFor(() => expect(rowCount()).toBe(4))
+    await screen.getByTitle('Archive (e)').click()
+    await router.navigate({ to: '/mail', search: { account: A, folder: 'INBOX', cat: 'primary', thread: threadUrl(A, 't3') } })
+    gate.resolve(true)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(router.state.location.search.thread).toBe(threadUrl(A, 't3'))
   })
 })

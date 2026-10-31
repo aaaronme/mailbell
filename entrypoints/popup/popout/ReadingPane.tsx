@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { getRouteApi, useNavigate } from '@tanstack/react-router'
+import { getRouteApi, useNavigate, useRouter } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArchiveIcon,
@@ -29,11 +29,9 @@ import { removesFromFolder, type ActionTarget, type MailAction } from '@/lib/mai
 import { useMarkRead } from '@/lib/mail/markRead'
 import { useLabels, useOpenThread, useThreadList } from '@/lib/mail/queries'
 import { runUndoable } from '@/lib/mail/undo'
-import { getSettings, isSettingsChange } from '@/lib/settings'
+import { isSettingsChange, settingsOptions } from '@/lib/settings'
 
 const route = getRouteApi('/mail')
-
-const SETTINGS_KEY = ['settings']
 
 // The bar acts on `targets`; `labelIds` is what each of them currently has.
 interface Targets {
@@ -51,23 +49,33 @@ export function ReadingPane({
   const search = route.useSearch()
   const { thread: url, folder } = search
   const navigate = useNavigate({ from: '/mail' })
+  const router = useRouter()
   const queryClient = useQueryClient()
   const { rows } = useThreadList(search)
   const open = useOpenThread(url)
   const parsed = url ? parseThreadUrl(url) : null
-  const labels = useLabels(parsed?.account ?? '').data
 
-  const settings = useQuery({ queryKey: SETTINGS_KEY, queryFn: getSettings }).data
+  const settings = useQuery(settingsOptions).data
   useEffect(() => {
     // The popup's Settings page lives in another document.
     const onChanged = (changes: Record<string, unknown>, area: string) => {
-      if (isSettingsChange(changes, area)) void queryClient.invalidateQueries({ queryKey: SETTINGS_KEY })
+      if (isSettingsChange(changes, area)) void queryClient.invalidateQueries({ queryKey: settingsOptions.queryKey })
     }
     browser.storage.onChanged.addListener(onChanged)
     return () => browser.storage.onChanged.removeListener(onChanged)
   }, [queryClient])
   // Unknown until loaded: nothing is marked on a guess.
-  const { engage } = useMarkRead(open.data, settings?.markRead ?? 'manual')
+  const { engage, keepUnread } = useMarkRead(open.data, settings?.markRead ?? 'manual')
+
+  const here: ActionTarget[] = url && parsed ? [{ ...parsed, url }] : []
+  const picked = rows.filter((it) => checked.has(it.url))
+  const { targets, labelIds }: Targets = picked.length
+    ? {
+        targets: picked.map((it) => ({ account: it.account, threadId: it.threadId, url: it.url })),
+        labelIds: picked.map((it) => it.labelIds),
+      }
+    : { targets: here, labelIds: [open.data?.labelIds ?? []] }
+  const labels = useLabels(targets[0]?.account ?? '').data
 
   if (!url || !parsed) {
     return (
@@ -77,14 +85,6 @@ export function ReadingPane({
     )
   }
 
-  const here: ActionTarget = { ...parsed, url }
-  const picked = rows.filter((it) => checked.has(it.url))
-  const { targets, labelIds }: Targets = picked.length
-    ? {
-        targets: picked.map((it) => ({ account: it.account, threadId: it.threadId, url: it.url })),
-        labelIds: picked.map((it) => it.labelIds),
-      }
-    : { targets: [here], labelIds: [open.data?.labelIds ?? []] }
   const everyHas = (id: string) => labelIds.every((it) => it.includes(id))
 
   // The next row after the open one leaves, by the list as it was before.
@@ -96,11 +96,13 @@ export function ReadingPane({
   }
 
   const run = async (action: MailAction) => {
+    if (action.kind === 'unread' && targets.some((it) => it.url === url)) keepUnread()
     const ok = await runUndoable(action, targets)
     if (!ok || !removesFromFolder(action, folder)) return
     if (picked.length) onCheckedChange(new Set())
     const gone = new Set(targets.map((it) => it.url))
-    if (gone.has(url)) advance(gone)
+    // Only while the acted-on thread is still the open one.
+    if (gone.has(url) && router.state.location.search.thread === url) advance(gone)
   }
 
   const userLabels = (labels ?? []).filter((it) => it.type === 'user').sort((a, b) => a.name.localeCompare(b.name))

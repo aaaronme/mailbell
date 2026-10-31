@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { createStyleSheets } from '@/lib/addStyle'
 import { sanitizeMail, sanitizeStyles } from '@/lib/sanitizeMail'
-import { getSettings } from '@/lib/settings'
+import { settingsOptions } from '@/lib/settings'
 import type { Message } from '@/lib/api/gmail'
 import { useCorrespondents } from '@/lib/mail/correspondents'
 import { getTrustedSenders, shouldShowRemote, trustSender } from '@/lib/mail/remoteContent'
@@ -186,7 +186,7 @@ export function ProtectedContent(props: {
   const [formatted, setFormatted] = useState(false)
   // Per mail and per session; "Always show from this sender" is what persists.
   const [shownOnce, setShownOnce] = useState(false)
-  const settings = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const settings = useQuery(settingsOptions)
   const trustedKey = ['trustedSenders', account]
   const trusted = useQuery({ queryKey: trustedKey, queryFn: () => getTrustedSenders(account) })
   const correspondents = useCorrespondents(account)
