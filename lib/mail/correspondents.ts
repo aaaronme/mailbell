@@ -12,33 +12,50 @@ async function readAll(): Promise<Store> {
   return stored ?? {}
 }
 
-// Writes are read-modify-write on one key, so they're chained to keep two
-// concurrent adds from losing each other's addresses.
+// Writes are read-modify-write, so they're chained to keep two concurrent ones
+// from losing each other's changes. This serialises within one JS context only;
+// the popup, popout and background are separate contexts.
 let writeChain: Promise<unknown> = Promise.resolve()
 
-export function addCorrespondents(account: string, emails: string[]): Promise<void> {
-  const run = async () => {
-    const all = await readAll()
-    const added = emails.map((it) => it.trim().toLowerCase()).filter(Boolean)
-    // Re-adding moves an address to the newest end, so the cap drops the stalest.
-    const kept = (all[account] ?? []).filter((it) => !added.includes(it))
-    const next = [...new Set([...kept, ...added])].slice(-CAP)
-    await browser.storage.local.set({ [KEY]: { ...all, [account]: next } })
-  }
+function serialised<T>(run: () => Promise<T>): Promise<T> {
   const result = writeChain.then(run, run)
   writeChain = result.catch(() => {})
   return result
+}
+
+export function addCorrespondents(account: string, emails: string[]): Promise<void> {
+  return serialised(async () => {
+    const all = await readAll()
+    const added = emails.map((it) => it.trim().toLowerCase()).filter(Boolean)
+    const addedSet = new Set(added)
+    // Re-adding moves an address to the newest end, so the cap drops the stalest.
+    const kept = (all[account] ?? []).filter((it) => !addedSet.has(it))
+    const next = [...new Set([...kept, ...added])].slice(-CAP)
+    await browser.storage.local.set({ [KEY]: { ...all, [account]: next } })
+  })
 }
 
 export async function getCorrespondents(account: string): Promise<Set<string>> {
   return new Set((await readAll())[account] ?? [])
 }
 
+const readBootstrapped = async () =>
+  (await browser.storage.local.get<Record<string, string[]>>(BOOTSTRAPPED_KEY))[BOOTSTRAPPED_KEY] ?? []
+
+const inFlight = new Map<string, Promise<void>>()
+
 // Seeds the store from the last 200 Sent messages, once per account.
-export async function bootstrapCorrespondents(account: string): Promise<void> {
-  const read = async () =>
-    (await browser.storage.local.get<Record<string, string[]>>(BOOTSTRAPPED_KEY))[BOOTSTRAPPED_KEY] ?? []
-  if ((await read()).includes(account)) return
+export function bootstrapCorrespondents(account: string): Promise<void> {
+  let running = inFlight.get(account)
+  if (!running) {
+    running = seed(account).finally(() => inFlight.delete(account))
+    inFlight.set(account, running)
+  }
+  return running
+}
+
+async function seed(account: string): Promise<void> {
+  if ((await readBootstrapped()).includes(account)) return
   const { messages = [] } = await gmailFetch<{ messages?: { id: string }[] }>(
     account,
     '/messages?labelIds=SENT&maxResults=200',
@@ -53,7 +70,9 @@ export async function bootstrapCorrespondents(account: string): Promise<void> {
     )
   })
   await addCorrespondents(account, recipients.flat())
-  await browser.storage.local.set({ [BOOTSTRAPPED_KEY]: [...new Set([...(await read()), account])] })
+  await serialised(async () =>
+    browser.storage.local.set({ [BOOTSTRAPPED_KEY]: [...new Set([...(await readBootstrapped()), account])] }),
+  )
 }
 
 export function useCorrespondents(account: string) {

@@ -72,4 +72,27 @@ describe('bootstrapCorrespondents', () => {
     await bootstrapCorrespondents(A)
     expect(fetchMock.mock.calls.length).toBe(calls)
   })
+  it('leaves the account unflagged on failure and retries later', async () => {
+    setTokenSource(async () => 'T')
+    let fail = true
+    const fetchMock = vi.fn(async (url: string) => {
+      if (fail) return new Response('nope', { status: 500 })
+      return new URL(url).pathname.endsWith('/messages') ? Response.json({}) : Response.json({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(bootstrapCorrespondents(A)).rejects.toThrow()
+    expect((await fakeBrowser.storage.local.get('correspondentsBootstrapped')).correspondentsBootstrapped).toBeUndefined()
+    fail = false
+    const before = fetchMock.mock.calls.length
+    await bootstrapCorrespondents(A)
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(before)
+    expect((await fakeBrowser.storage.local.get('correspondentsBootstrapped')).correspondentsBootstrapped).toEqual([A])
+  })
+  it('shares one fetch between concurrent callers', async () => {
+    setTokenSource(async () => 'T')
+    const fetchMock = vi.fn(async () => Response.json({}))
+    vi.stubGlobal('fetch', fetchMock)
+    await Promise.all([bootstrapCorrespondents(A), bootstrapCorrespondents(A)])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
 })

@@ -5,8 +5,8 @@ export type SuspicionReason = 'spam' | 'auth-failed' | 'name-spoof' | 'lookalike
 export const REASON_TEXT: Record<SuspicionReason, string> = {
   spam: 'This is in Spam',
   'auth-failed': 'This mail failed sender checks',
-  'name-spoof': 'The sender’s name shows a different address',
-  lookalike: 'This domain looks like one you’ve written to',
+  'name-spoof': "The sender's name shows a different address",
+  lookalike: "This domain looks like one you've written to",
 }
 
 // RFC 3492 decoder, for the "xn--" labels of internationalized domains.
@@ -23,7 +23,8 @@ function punycodeDecode(input: string): string {
     for (let w = 1, k = base; ; k += base) {
       if (idx >= input.length) throw new RangeError('bad punycode')
       const c = input.charCodeAt(idx++)
-      const digit = c - 48 < 10 ? c - 22 : c - 65 < 26 ? c - 65 : c - 97 < 26 ? c - 97 : base
+      const digit =
+        c >= 48 && c <= 57 ? c - 22 : c >= 65 && c <= 90 ? c - 65 : c >= 97 && c <= 122 ? c - 97 : base
       if (digit >= base) throw new RangeError('bad punycode')
       i += digit * w
       const t = k <= bias ? 1 : k >= bias + 26 ? 26 : k - bias
@@ -95,11 +96,14 @@ export function isLookalike(domain: string, known: Set<string>): boolean {
   return knownDomains.some((it) => skeleton(it) === mineSkeleton || withinOneEdit(mineChars, [...it]))
 }
 
-const ADDRESS_IN_TEXT = /[^\s<>@]+@[^\s<>@]+\.[a-z]{2,}/gi
+// Local part and host stop at the punctuation that wraps an address in a
+// display name ("Bob (bob@x.com)", "Smith,bob@x.com").
+const ADDRESS_IN_TEXT = /[^\s<>()[\]@,;:"\\]+@[^\s<>()[\]@,;:"\\]+\.[a-z]{2,}/gi
 
 export function nameSpoofs(displayName: string, email: string): boolean {
-  const real = email.trim().toLowerCase()
-  return (displayName.match(ADDRESS_IN_TEXT) ?? []).some((it) => it.toLowerCase() !== real)
+  // NFKC folds lookalikes such as a fullwidth "\uFF20" into the real "@".
+  const real = email.normalize('NFKC').trim().toLowerCase()
+  return (displayName.normalize('NFKC').match(ADDRESS_IN_TEXT) ?? []).some((it) => it.toLowerCase() !== real)
 }
 
 export function suspicionOf(input: {

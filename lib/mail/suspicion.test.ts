@@ -44,6 +44,18 @@ describe('nameSpoofs', () => {
     expect(nameSpoofs('bob@x.com', 'bob@x.com')).toBe(false)
     expect(nameSpoofs('Bob@X.com', 'bob@x.com')).toBe(false)
   })
+  it('does not trip on punctuation around the sender’s own address', () => {
+    for (const name of ['Bob (bob@x.com)', 'Smith,bob@x.com', '"bob@x.com"', 'Smith;bob@x.com', 'bob@x.com:', '[bob@x.com]'])
+      expect(nameSpoofs(name, 'bob@x.com'), name).toBe(false)
+  })
+  it('still flags another address in the same forms', () => {
+    for (const name of ['Bob (ceo@y.com)', 'Smith,ceo@y.com', '"ceo@y.com"', 'Smith;ceo@y.com', '[ceo@y.com]'])
+      expect(nameSpoofs(name, 'bob@x.com'), name).toBe(true)
+  })
+  it('sees through fullwidth lookalike characters', () => {
+    expect(nameSpoofs('support＠paypal.com', 'x@evil.ru')).toBe(true)
+    expect(nameSpoofs('bob＠x.com', 'bob@x.com')).toBe(false)
+  })
 })
 
 describe('suspicionOf', () => {
@@ -71,6 +83,15 @@ describe('suspicionOf', () => {
     ).toEqual(['name-spoof', 'lookalike'])
   })
   it('has text for every reason', () => {
-    expect(REASON_TEXT.spam).toBe('This is in Spam')
+    expect(REASON_TEXT).toEqual({
+      spam: 'This is in Spam',
+      'auth-failed': 'This mail failed sender checks',
+      'name-spoof': "The sender's name shows a different address",
+      lookalike: "This domain looks like one you've written to",
+    })
+  })
+  it('survives malformed punycode labels', () => {
+    for (const d of ['xn--:::.com', 'xn--9999999999999999999999.com', 'xn--.com'])
+      expect(() => isLookalike(d, new Set(['paypal.com'])), d).not.toThrow()
   })
 })
