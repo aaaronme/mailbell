@@ -18,15 +18,17 @@ const { setTokenSource, threadUrl } = await import('@/lib/api/gmail')
 const { runUndoable, undoLatest } = await import('@/lib/mail/undo')
 
 const A = 'a@example.com'
+const B = 'b@example.com'
 const json = (body: object) => new Response(JSON.stringify(body))
 const url = (id: string) => threadUrl(A, id)
 
 function stubFetch() {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: string) => {
+    vi.fn(async (input: string, init?: RequestInit) => {
+      const asB = (init?.headers as Record<string, string> | undefined)?.Authorization === `Bearer ${B}`
       const path = new URL(input).pathname.replace(/^.*\/gmail\/v1\/users\/me/, '')
-      if (path === '/threads') return json({ threads: ['A', 'B', 'C'].map((id) => ({ id })) })
+      if (path === '/threads') return json({ threads: (asB ? ['X'] : ['A', 'B', 'C']).map((id) => ({ id })) })
       if (path.startsWith('/threads/')) {
         const id = path.slice('/threads/'.length)
         return json({
@@ -49,7 +51,7 @@ function stubFetch() {
   )
 }
 
-async function mount(search: string) {
+async function mount(search: string, rowCount = 3) {
   await page.viewport(1200, 800)
   window.location.hash = `#/mail?${search}`
   const router = createAppRouter([`/mail?${search}`], { popout: true })
@@ -58,7 +60,7 @@ async function mount(search: string) {
       <RouterProvider router={router} />
     </QueryClientProvider>,
   )
-  await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="thread-list"] [data-row]').length).toBe(3))
+  await vi.waitFor(() => expect(document.querySelectorAll('[data-testid="thread-list"] [data-row]').length).toBe(rowCount))
   return { router, screen }
 }
 
@@ -196,5 +198,74 @@ describe('popout shortcuts', () => {
     expect(runUndoable).not.toHaveBeenCalled()
     await userEvent.keyboard('{Escape}')
     await expect.element(screen.getByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('Enter on a focused control activates it instead of opening the thread', async () => {
+    const { screen } = await mount(open('B'))
+    const star = screen.getByTitle('Star (s)').element() as HTMLElement
+    star.focus()
+    await userEvent.keyboard('{Enter}')
+    await vi.waitFor(() => expect(runUndoable).toHaveBeenCalledWith({ kind: 'star' }, expect.anything()))
+    expect(document.activeElement).toBe(star)
+  })
+
+  it('l does not open the label menu for threads of two accounts', async () => {
+    await browser.storage.local.set({
+      oauthAccounts: [A, B].map((email) => ({ email, refreshToken: 'r', accessToken: 't', expiresAt: 0 })),
+    })
+    await mount(`account=all&folder=INBOX&thread=${encodeURIComponent(url('A'))}&cat=primary`, 4)
+    for (const subject of ['A', 'X']) document.querySelector<HTMLElement>(`input[aria-label="Select ${subject}"]`)!.click()
+    await userEvent.keyboard('l')
+    expect(document.querySelector('[role=menu]')).toBeNull()
+  })
+
+  it('v does not open the move menu outside the inbox and labels', async () => {
+    await mount(`account=${A}&folder=SENT&thread=${encodeURIComponent(url('B'))}&cat=primary`)
+    await userEvent.keyboard('v')
+    expect(document.querySelector('[role=menu]')).toBeNull()
+  })
+
+  it('g followed by an unmapped key does not run that key alone', async () => {
+    await mount(open('B'))
+    await userEvent.keyboard('gx')
+    const boxes = [...document.querySelectorAll<HTMLInputElement>('[data-testid="thread-list"] input[type="checkbox"]')]
+    expect(boxes.some((it) => it.checked)).toBe(false)
+  })
+
+  it('U marks unread and ignores a capital without Shift', async () => {
+    await mount(open('B'))
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'U', bubbles: true, cancelable: true }))
+    expect(runUndoable).not.toHaveBeenCalled()
+    await userEvent.keyboard('{Shift>}U{/Shift}')
+    await vi.waitFor(() => expect(runUndoable).toHaveBeenCalledWith({ kind: 'unread' }, expect.anything()))
+  })
+
+  it('! reports spam, and not spam in Spam', async () => {
+    await mount(open('B'))
+    await userEvent.keyboard('!')
+    await vi.waitFor(() => expect(runUndoable).toHaveBeenCalledWith({ kind: 'spam' }, expect.anything()))
+  })
+
+  it('! says not spam in Spam', async () => {
+    await mount(`account=${A}&folder=SPAM&thread=${encodeURIComponent(url('B'))}&cat=primary`)
+    await userEvent.keyboard('!')
+    await vi.waitFor(() => expect(runUndoable).toHaveBeenCalledWith({ kind: 'notSpam' }, expect.anything()))
+  })
+
+  it('Backspace trashes and s stars', async () => {
+    await mount(open('B'))
+    await userEvent.keyboard('{Backspace}')
+    await vi.waitFor(() => expect(runUndoable).toHaveBeenCalledWith({ kind: 'trash' }, expect.anything()))
+    await userEvent.keyboard('s')
+    await vi.waitFor(() => expect(runUndoable).toHaveBeenCalledWith({ kind: 'star' }, expect.anything()))
+  })
+
+  it('typing e in the reply box does not archive', async () => {
+    const { screen } = await mount(open('B'))
+    await expect.element(screen.getByTitle('Reply (r)')).toBeInTheDocument()
+    await userEvent.keyboard('r')
+    await expect.element(screen.getByLabelText('Reply')).toBeInTheDocument()
+    await userEvent.keyboard('e')
+    expect(runUndoable).not.toHaveBeenCalled()
   })
 })

@@ -76,7 +76,7 @@ export function usePopoutShortcuts(ctx: PopoutShortcutContext) {
       r: () => ctx.openReply('reply'),
       a: () => ctx.openReply('all'),
       // Part 2 maps `c` to Mailbell's own compose; newEmail() would open Gmail.
-      '/': () => ctx.searchRef.current?.focus(),
+      '/': () => (ctx.searchRef.current ? ctx.searchRef.current.focus() : false),
       'g i': go('INBOX'),
       'g s': go('STARRED'),
       'g t': go('SENT'),

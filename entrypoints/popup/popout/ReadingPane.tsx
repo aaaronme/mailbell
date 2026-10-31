@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { getRouteApi } from '@tanstack/react-router'
 import {
   ArchiveIcon,
@@ -51,6 +52,15 @@ export function ReadingPane({
   const { run, targets, everyHas, starred } = actions
   const labels = useLabels(targets[0]?.account ?? '').data
 
+  const userLabels = (labels ?? []).filter((it) => it.type === 'user').sort((a, b) => a.name.localeCompare(b.name))
+  const oneAccount = new Set(targets.map((it) => it.account)).size === 1
+  const canMove = oneAccount && (folder === 'INBOX' || userLabels.some((it) => it.id === folder))
+  // The keyboard can ask for a menu whose button is disabled; it stays shut.
+  const menuOk = labelMenu === 'label' ? oneAccount : labelMenu === 'move' ? canMove : true
+  useEffect(() => {
+    if (!menuOk) onLabelMenuChange(null)
+  }, [menuOk, onLabelMenuChange])
+
   if (!url || !parsed) {
     return (
       <div data-testid="reading-pane" className="flex min-h-0 flex-1 items-center justify-center">
@@ -58,10 +68,6 @@ export function ReadingPane({
       </div>
     )
   }
-
-  const userLabels = (labels ?? []).filter((it) => it.type === 'user').sort((a, b) => a.name.localeCompare(b.name))
-  const oneAccount = new Set(targets.map((it) => it.account)).size === 1
-  const canMove = oneAccount && (folder === 'INBOX' || userLabels.some((it) => it.id === folder))
 
   return (
     <div data-testid="reading-pane" className="flex min-h-0 flex-1 flex-col">
@@ -83,7 +89,7 @@ export function ReadingPane({
           icon={StarIcon}
           onClick={() => void actions.toggleStar()}
         />
-        <DropdownMenu open={labelMenu === 'label'} onOpenChange={(on) => onLabelMenuChange(on ? 'label' : null)}>
+        <DropdownMenu open={labelMenu === 'label' && oneAccount} onOpenChange={(on) => onLabelMenuChange(on ? 'label' : null)}>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" title="Label as (l)" aria-label="Label as" disabled={!oneAccount}>
               <TagIcon />
@@ -105,7 +111,7 @@ export function ReadingPane({
             })}
           </DropdownMenuContent>
         </DropdownMenu>
-        <DropdownMenu open={labelMenu === 'move'} onOpenChange={(on) => onLabelMenuChange(on ? 'move' : null)}>
+        <DropdownMenu open={labelMenu === 'move' && canMove} onOpenChange={(on) => onLabelMenuChange(on ? 'move' : null)}>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" title="Move to (v)" aria-label="Move to" disabled={!canMove}>
               <FolderInputIcon />

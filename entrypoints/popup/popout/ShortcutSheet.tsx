@@ -44,7 +44,7 @@ export function ShortcutSheet({ open, onOpenChange }: { open: boolean; onOpenCha
           className="menu-surface fixed top-1/2 left-1/2 z-50 max-h-[90vh] w-[min(40rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 overflow-y-auto p-4 outline-none"
         >
           <DialogPrimitive.Title className="mb-3 text-sm font-medium">Keyboard shortcuts</DialogPrimitive.Title>
-          <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
+          <div className="grid gap-x-8 gap-y-4 grid-cols-2">
             {GROUPS.map((group) => (
               <section key={group.title}>
                 <h3 className="mb-1 text-xs text-foreground/60">{group.title}</h3>
@@ -52,7 +52,9 @@ export function ShortcutSheet({ open, onOpenChange }: { open: boolean; onOpenCha
                   {group.rows.map(([keys, what]) => (
                     <div key={keys} className="flex items-baseline justify-between gap-4 py-1 text-sm">
                       <dt className="text-foreground/70">{what}</dt>
-                      <dd className="shrink-0 font-mono text-xs">{keys}</dd>
+                      <dd className="shrink-0">
+                        <kbd className="font-mono text-xs">{keys}</kbd>
+                      </dd>
                     </div>
                   ))}
                 </dl>

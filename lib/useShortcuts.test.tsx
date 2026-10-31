@@ -50,13 +50,13 @@ describe('useShortcuts', () => {
     expect(fn).not.toHaveBeenCalled()
   })
 
-  it('a non-matching second key runs on its own', async () => {
+  it('a non-matching second key is dropped, not run on its own', async () => {
     const a = vi.fn()
     const b = vi.fn()
     await render(<Sequence shortcuts={{ 'g i': a, j: b }} />)
     press(document.body, 'g')
     press(document.body, 'j')
-    expect(b).toHaveBeenCalledOnce()
+    expect(b).not.toHaveBeenCalled()
     expect(a).not.toHaveBeenCalled()
   })
 
@@ -80,5 +80,42 @@ describe('useShortcuts', () => {
     press(document.body, 'i')
     expect(first).not.toHaveBeenCalled()
     expect(second).not.toHaveBeenCalled()
+  })
+
+  it('leaves Enter to a focused control, but not other keys', async () => {
+    const enter = vi.fn()
+    const e = vi.fn()
+    const screen = await render(
+      <>
+        <Sequence shortcuts={{ Enter: enter, e }} />
+        <button type="button">act</button>
+        <a href="#x">link</a>
+      </>,
+    )
+    for (const el of [screen.getByRole('button', { name: 'act' }).element(), screen.getByRole('link').element()]) {
+      press(el, 'Enter')
+    }
+    expect(enter).not.toHaveBeenCalled()
+    press(document.body, 'Enter')
+    expect(enter).toHaveBeenCalledOnce()
+    press(screen.getByRole('button', { name: 'act' }).element(), 'e')
+    expect(e).toHaveBeenCalledOnce()
+  })
+
+  it('ignores a capital letter without Shift (CapsLock) and keys while composing', async () => {
+    const fn = vi.fn()
+    await render(<Sequence shortcuts={{ U: fn, e: fn }} />)
+    press(document.body, 'U')
+    press(document.body, 'e', { isComposing: true })
+    expect(fn).not.toHaveBeenCalled()
+    press(document.body, 'U', { shiftKey: true })
+    expect(fn).toHaveBeenCalledOnce()
+  })
+
+  it('leaves the default alone when the handler returns false', async () => {
+    await render(<Sequence shortcuts={{ '/': () => false }} />)
+    const ev = new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true })
+    document.body.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(false)
   })
 })
