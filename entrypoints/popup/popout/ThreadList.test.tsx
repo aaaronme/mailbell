@@ -244,6 +244,106 @@ describe('ThreadList', () => {
   })
 })
 
+describe('ThreadList in All inboxes', () => {
+  const B = 'b@example.org'
+  // Per account: thread id -> [sender, minutes ago]. A missing account fails its list call.
+  let inboxes: Record<string, Record<string, [string, number]>>
+  // Per account: the threads of its second page, if it has one.
+  let later: Record<string, Record<string, [string, number]>>
+
+  beforeEach(async () => {
+    fakeBrowser.reset()
+    vi.restoreAllMocks()
+    vi.spyOn(fakeBrowser.identity, 'getRedirectURL').mockReturnValue('https://x.extensions.allizom.org/')
+    await browser.storage.local.set({
+      oauthAccounts: [
+        { email: A, refreshToken: 'r', accessToken: 't', expiresAt: 0 },
+        { email: B, refreshToken: 'r', accessToken: 't', expiresAt: 0 },
+      ],
+      correspondents: { [B]: ['pal@paypal.com'] },
+      correspondentsBootstrapped: [A, B],
+    })
+    setTokenSource(async (account) => account)
+    labels = []
+    later = {}
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string, init?: RequestInit) => {
+        const url = new URL(input)
+        const path = url.pathname.replace(/^.*\/gmail\/v1\/users\/me/, '')
+        const account = new Headers(init?.headers).get('Authorization')!.replace('Bearer ', '')
+        if (path === '/threads') {
+          const own = inboxes[account]
+          if (!own) return new Response('no', { status: 500 })
+          const second = url.searchParams.has('pageToken')
+          const ids = Object.keys(second ? later[account]! : own)
+          return json({ threads: ids.map((id) => ({ id })), ...(!second && later[account] ? { nextPageToken: 'p2' } : {}) })
+        }
+        if (path.startsWith('/threads/')) {
+          const id = path.slice('/threads/'.length)
+          const [from, minutes] = (inboxes[account]![id] ?? later[account]![id])!
+          const headers = [
+            { name: 'From', value: `Pat <${from}>` },
+            { name: 'Subject', value: `Subject ${id}` },
+          ]
+          return json({
+            id,
+            messages: [
+              { id: `m${id}`, labelIds: ['INBOX'], internalDate: String(Date.now() - minutes * 60_000), payload: { headers } },
+            ],
+          })
+        }
+        return json({ labels: [] })
+      }),
+    )
+  })
+
+  const order = () => [...rows()].map((it) => it.getAttribute('data-row'))
+
+  it('merges accounts newest first', async () => {
+    inboxes = {
+      [A]: { a1: ['x@example.net', 5], a2: ['x@example.net', 30] },
+      [B]: { b1: ['x@example.net', 10], b2: ['x@example.net', 20] },
+    }
+    await mount('account=all&folder=INBOX&cat=primary')
+    await vi.waitFor(() => expect(order()).toEqual(['a1', 'b1', 'b2', 'a2']))
+  })
+
+  it('pages the account that limits the cut, then shows the rows it held back', async () => {
+    inboxes = {
+      [A]: { a1: ['x@example.net', 5], a2: ['x@example.net', 30] },
+      [B]: { b1: ['x@example.net', 10], b2: ['x@example.net', 60] },
+    }
+    later = { [A]: { a3: ['x@example.net', 40], a4: ['x@example.net', 50] } }
+    await mount('account=all&folder=INBOX&cat=primary')
+    await vi.waitFor(() => expect(order()).toEqual(['a1', 'b1', 'a2', 'a3', 'a4', 'b2']))
+    expect(document.querySelector('[data-testid="thread-sentinel"]')).toBeNull()
+  })
+
+  it('still shows the accounts that load when one fails', async () => {
+    inboxes = { [A]: { a1: ['x@example.net', 5] } }
+    await mount('account=all&folder=INBOX&cat=primary')
+    await vi.waitFor(() => expect(order()).toEqual(['a1']))
+  })
+
+  it('shows an error when every account fails', async () => {
+    inboxes = {}
+    const { screen } = await mount('account=all&folder=INBOX&cat=primary')
+    await expect.element(screen.getByText("Couldn't load mail")).toBeInTheDocument()
+  })
+
+  it("flags a lookalike against the row's own account's contacts", async () => {
+    inboxes = {
+      [A]: { a1: ['pal@paypa1.com', 5] },
+      [B]: { b1: ['pal@paypa1.com', 10] },
+    }
+    await mount('account=all&folder=INBOX&cat=primary')
+    await vi.waitFor(() => expect(order()).toEqual(['a1', 'b1']))
+    await vi.waitFor(() => expect(document.querySelector('[data-row="b1"] [data-suspicious]')).not.toBeNull())
+    expect(document.querySelector('[data-row="a1"] [data-suspicious]')).toBeNull()
+  })
+})
+
 describe('rowDate', () => {
   const now = new Date(2026, 9, 31, 15, 0) // Saturday
   it('shows the time today, the weekday within 6 days, the date from 7', () => {

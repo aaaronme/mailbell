@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAccessToken } from '../auth/oauth'
 import { setTokenSource } from '../api/gmail'
 import type { ThreadRow } from '../api/mailbox'
+import type { AllInboxesPage } from './merge'
 
 vi.mock('@/lib/messager', () => ({ bgMessager: { sendMessage: vi.fn(async () => undefined) } }))
 
@@ -177,6 +178,30 @@ describe('actions', () => {
     await mod.applyAction({ kind: 'archive' }, [target('A')])
     expect(cachedIds(allKey)).toEqual(['B'])
     expect(cachedIds(labelKey)).toEqual(['B'])
+  })
+
+  it('archiving in All inboxes patches the per-account pages, and undo restores them', async () => {
+    const { allInboxesKey } = await import('./queries')
+    const { mergeInboxes, toAccountPages } = await import('./merge')
+    const key = allInboxesKey({ labelIds: ['INBOX'], includeSpamTrash: false }, ['a@x.com', 'b@x.com'])
+    const dated = (account: string, threadId: string, date: string) => ({ ...row(threadId, account), date })
+    queryClient.setQueryData(key, {
+      pages: [
+        {
+          rows: [dated('a@x.com', 'A', '2026-01-02T00:00:00Z'), dated('b@x.com', 'B', '2026-01-01T00:00:00Z')],
+          tokens: { 'a@x.com': null, 'b@x.com': null },
+        },
+      ],
+      pageParams: [{}],
+    })
+    const merged = () =>
+      mergeInboxes(
+        toAccountPages(queryClient.getQueryData<{ pages: AllInboxesPage[] }>(key)!.pages, ['a@x.com', 'b@x.com']),
+      ).rows.map((r) => r.threadId)
+    const patch = await mod.applyWithPatch({ kind: 'archive' }, [target('A', 'a@x.com')])
+    expect(merged()).toEqual(['B'])
+    await mod.revertAction({ kind: 'archive' }, [target('A', 'a@x.com')], patch)
+    expect(merged()).toEqual(['A', 'B'])
   })
 
   it('removes from and restores into the right page', async () => {

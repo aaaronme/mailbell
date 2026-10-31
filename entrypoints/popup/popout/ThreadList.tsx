@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import { ArchiveIcon, MailCheckIcon, MailIcon, OctagonAlertIcon, Trash2Icon, XIcon } from 'lucide-react'
 import { PageTitle } from '@/components/extra/PageHeader'
@@ -7,7 +7,9 @@ import { Input } from '@/components/ui/input'
 import type { ThreadRow } from '@/lib/api/mailbox'
 import { CATEGORY_LABEL, SYSTEM_FOLDERS, type Category } from '@/lib/mail/folders'
 import { registrableDomain } from '@/lib/mail/identity'
-import { useCorrespondents } from '@/lib/mail/correspondents'
+import { useQueries } from '@tanstack/react-query'
+import { getCorrespondents } from '@/lib/mail/correspondents'
+import { useAccounts } from '@/lib/useAccounts'
 import { useLabels, useThreadList } from '@/lib/mail/queries'
 import type { MailAction } from '@/lib/mail/actions'
 import { runUndoable } from '@/lib/mail/undo'
@@ -15,6 +17,8 @@ import { cn } from '@/lib/utils'
 import { ThreadListRow } from './ThreadListRow'
 
 const route = getRouteApi('/mail')
+
+const NO_DOMAINS = new Set<string>()
 
 const CATEGORY_NAME: Record<Category, string> = {
   primary: 'Primary',
@@ -47,11 +51,22 @@ export function ThreadList({
   const { account, folder, cat, q, unread, thread } = search
   const { rows, hasNextPage, fetchNextPage, isFetchingNextPage, isPending, error } = useThreadList(search)
   const labels = useLabels(account).data
-  const correspondents = useCorrespondents(account)
-  const knownDomains = useMemo(
-    () => new Set([...(correspondents.data ?? [])].map((it) => registrableDomain(it))),
-    [correspondents.data],
+  const accounts = useAccounts().data
+  const mailboxes = useMemo(
+    () => (account === 'all' ? (accounts ?? []).map((it) => it.email) : [account]),
+    [account, accounts],
   )
+  // Each row is checked against the contacts of the account it arrived in.
+  // A stable combine keeps the Sets, and so every row's memo, from changing on each render.
+  const combine = useCallback(
+    (results: { data?: Set<string> }[]) =>
+      new Map(mailboxes.map((it, i) => [it, new Set([...(results[i]?.data ?? [])].map((e) => registrableDomain(e)))])),
+    [mailboxes],
+  )
+  const knownDomains = useQueries({
+    queries: mailboxes.map((it) => ({ queryKey: ['correspondents', it], queryFn: () => getCorrespondents(it) })),
+    combine,
+  })
 
   const setSearch = (patch: Partial<typeof search>) => navigate({ search: (prev) => ({ ...prev, ...patch }) })
 
@@ -230,7 +245,7 @@ export function ThreadList({
             anyChecked={targets.length > 0}
             showAccount={account === 'all'}
             folder={folder}
-            knownDomains={knownDomains}
+            knownDomains={knownDomains.get(row.account) ?? NO_DOMAINS}
             onSelect={() => setSearch({ thread: row.url })}
             onCheck={(shift) => toggle(index, shift)}
           />
