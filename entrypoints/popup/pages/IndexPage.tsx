@@ -187,6 +187,16 @@ function Toolbar() {
         </>
       }
     >
+      {/* The full mail client, used often enough to sit out of the menu.
+          ?view=tab tells main.tsx not to pin the popup width. */}
+      {accounts.length > 0 && (
+        <Button asChild size="sm" variant="secondary">
+          <a href={browser.runtime.getURL('/popup.html?view=tab')} target="_blank">
+            <SquareArrowOutUpRightIcon />
+            Open in tab
+          </a>
+        </Button>
+      )}
       {(mailQuery.data?.threads.length ?? 0) > 0 && (
         <Button
           size="icon"
@@ -245,13 +255,6 @@ function Toolbar() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align={'end'}>
-          <DropdownMenuItem asChild>
-            {/* ?view=tab tells main.tsx not to pin the popup width. */}
-            <a href={browser.runtime.getURL('/popup.html?view=tab')} target="_blank">
-              <SquareArrowOutUpRightIcon />
-              Popout
-            </a>
-          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => navigate({ to: '/settings' })}>
             <SettingsIcon />
             Settings

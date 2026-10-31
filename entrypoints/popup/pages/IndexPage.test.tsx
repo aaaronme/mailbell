@@ -63,6 +63,18 @@ describe('IndexPage', () => {
     expect(document.querySelector('[title="Open in Gmail"]')).toBeNull()
   })
 
+  it('opens the mail client in a tab from the header once signed in', async () => {
+    await browser.storage.local.set({ accounts: ['a@example.com'], threads: [] })
+    const screen = await render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={createAppRouter(['/'])} />
+      </QueryClientProvider>,
+    )
+    const link = screen.getByRole('link', { name: 'Open in tab' })
+    await expect.element(link).toHaveAttribute('href', browser.runtime.getURL('/popup.html?view=tab'))
+    await expect.element(link).toHaveAttribute('target', '_blank')
+  })
+
   it('refresh button pulls fresh state directly instead of depending solely on the background push', async () => {
     // Regression test: the refresh button used to only send 'refreshThreads'
     // and wait for background's 'refreshPopup' push, which is lost if the
