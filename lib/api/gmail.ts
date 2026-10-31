@@ -48,7 +48,7 @@ export interface Attachment {
   attachmentId: string
 }
 
-interface Message {
+export interface Message {
   senderName: string // Sender name
   senderEmail: string // Sender email
   time: string // Send time
