@@ -13,7 +13,7 @@ import { debugLog } from '../debugLog'
 import { liftBackgroundImages } from '../emailBackground'
 import { getAccessToken, getAccounts } from '../auth/oauth'
 import { senderIdentity, type SenderIdentity } from '../mail/identity'
-import { buildReply,toBase64Url, type Recipients } from '../reply'
+import { buildReply, toBase64Url, type Recipients } from '../reply'
 import { parseInvite, type CalendarEvent } from '../calendar'
 
 export interface Feed {

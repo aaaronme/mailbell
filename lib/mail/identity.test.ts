@@ -34,23 +34,71 @@ describe('senderIdentity', () => {
     expect(id).toMatchObject({ status: 'unverified', reason: 'No DMARC policy' })
   })
 
-  it('uses only the first mx.google.com header', () => {
+  it('uses only the first Authentication-Results header', () => {
+    const pass = auth('mx.google.com; dkim=pass header.i=@a.com; dmarc=pass header.from=a.com')
+    const fail = auth('mx.google.com; dkim=fail header.i=@a.com; dmarc=fail header.from=a.com')
+    expect(senderIdentity([fail, pass], 'x@a.com').status).toBe('failed')
+    expect(senderIdentity([pass, fail], 'x@a.com').status).toBe('verified')
+  })
+
+  it('is unverified when a foreign Authentication-Results comes first', () => {
     const id = senderIdentity(
-      [
-        auth('mx.google.com; dkim=pass header.i=@a.com; dmarc=pass header.from=a.com'),
-        auth('other.example; dkim=fail; dmarc=fail header.from=a.com'),
-      ],
+      [auth('evil.example; dmarc=pass header.from=a.com; dkim=pass header.d=a.com'), auth('mx.google.com; dmarc=pass header.from=a.com; dkim=pass header.d=a.com')],
       'x@a.com',
     )
+    expect(id).toMatchObject({ status: 'unverified', reason: 'Not checked by Gmail' })
+  })
+
+  it('ignores method=result text inside comments', () => {
+    const id = senderIdentity(
+      [auth('mx.google.com; spf=pass (google.com: domain of dmarc=pass@evil.com designates 1.2.3.4 as permitted sender) smtp.mailfrom=evil.com')],
+      'x@evil.com',
+    )
+    expect(id.status).toBe('unverified')
+  })
+
+  it('ignores properties injected through comments', () => {
+    const id = senderIdentity(
+      [auth('mx.google.com; dkim=pass (header.d=victim.com) header.d=evil.com; dmarc=pass (x header.from=victim.com) header.from=evil.com')],
+      'x@victim.com',
+    )
+    expect(id.status).toBe('unverified')
+    expect(id.signedBy).toBe('evil.com')
+  })
+
+  it('handles nested comments and quoted strings', () => {
+    const id = senderIdentity(
+      [auth('mx.google.com; dkim=pass (a (b dmarc=pass) c) header.d=a.com; dmarc=fail (")") header.from=a.com')],
+      'x@a.com',
+    )
+    expect(id.status).toBe('failed')
+  })
+
+  it('reads results case-insensitively', () => {
+    const id = senderIdentity([auth('MX.Google.COM; DKIM=PASS header.d=A.com; DMARC=PASS header.from=a.COM')], 'x@a.com')
     expect(id.status).toBe('verified')
   })
 
-  it('ignores a leading header from another authserv-id', () => {
+  it('reads header.from only from the dmarc segment', () => {
     const id = senderIdentity(
-      [auth('other.example; dmarc=fail'), auth('mx.google.com; dkim=pass header.d=a.com; dmarc=pass header.from=a.com')],
-      'x@a.com',
+      [auth('mx.google.com; dkim=pass header.d=evil.com header.from=evil.com; dmarc=pass header.from=a.com')],
+      'x@evil.com',
     )
-    expect(id.status).toBe('verified')
+    expect(id.status).toBe('unverified')
+  })
+
+  it('unverified when the authenticated header.from is not the displayed domain', () => {
+    const id = senderIdentity(
+      [auth('mx.google.com; dkim=pass header.d=evil.com; dmarc=pass header.from=evil.com')],
+      'x@victim.com',
+    )
+    expect(id.status).toBe('unverified')
+  })
+
+  it('does not report a dmarc error as a missing policy', () => {
+    const id = senderIdentity([auth('mx.google.com; dmarc=temperror header.from=a.com')], 'x@a.com')
+    expect(id.status).toBe('unverified')
+    expect(id.reason).not.toBe('No DMARC policy')
   })
 
   it('missing header is unverified', () => {
@@ -82,7 +130,7 @@ describe('senderIdentity', () => {
     expect(id.signedBy).toBe('sendgrid.net')
   })
 
-  it('reads signedBy from DKIM-Signature and mailedBy from Return-Path', () => {
+  it('does not trust a DKIM-Signature header for signedBy; reads mailedBy from Return-Path', () => {
     const id = senderIdentity(
       [
         { name: 'DKIM-Signature', value: 'v=1; a=rsa-sha256; d=mail.a.com; s=x' },
@@ -90,7 +138,7 @@ describe('senderIdentity', () => {
       ],
       'x@a.com',
     )
-    expect(id.signedBy).toBe('mail.a.com')
+    expect(id.signedBy).toBeUndefined()
     expect(id.mailedBy).toBe('a.com')
   })
 
@@ -98,6 +146,12 @@ describe('senderIdentity', () => {
     expect(senderIdentity([], 'x@a.com').tls).toBeUndefined()
     expect(senderIdentity([{ name: 'Received', value: 'by x with ESMTPS id 1' }], 'x@a.com').tls).toBe(true)
     expect(senderIdentity([{ name: 'Received', value: 'by x with SMTP id 1' }], 'x@a.com').tls).toBe(false)
+    // Only the topmost hop, the one Gmail made, counts.
+    const hops = [
+      { name: 'Received', value: 'by mx.google.com with SMTP id 2' },
+      { name: 'Received', value: 'by x with ESMTPS id 1' },
+    ]
+    expect(senderIdentity(hops, 'x@a.com').tls).toBe(false)
   })
 
   it('replyToMismatch when registrable domains differ', () => {
@@ -110,11 +164,18 @@ describe('senderIdentity', () => {
 })
 
 describe('registrableDomain', () => {
+  it('treats private suffixes as registrable', () => {
+    expect(registrableDomain('a.github.io')).toBe('a.github.io')
+    expect(registrableDomain('a.github.io')).not.toBe(registrableDomain('b.github.io'))
+  })
+
   it.each([
     ['springfield.gov.x7.ru', 'x7.ru'],
     ['a.b.co.uk', 'b.co.uk'],
     ['x@mail.github.com', 'github.com'],
     ['localhost', 'localhost'],
+    ['1.2.3.4', '1.2.3.4'],
+    ['', ''],
   ])('%s -> %s', (input, expected) => {
     expect(registrableDomain(input)).toBe(expected)
   })
