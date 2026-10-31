@@ -3,6 +3,8 @@ import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import { ArrowLeftIcon, PanelLeftIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Sidebar } from './Sidebar'
+import { useBootstrapCorrespondents } from './useBootstrapCorrespondents'
+import { useAccounts } from '@/lib/useAccounts'
 
 const route = getRouteApi('/mail')
 
@@ -27,6 +29,7 @@ export function MailRoute() {
   const wide = useMediaQuery('(min-width: 1000px)')
   const medium = useMediaQuery('(min-width: 700px)')
   const [drawer, setDrawer] = useState(false)
+  useBootstrapCorrespondents(useAccounts().data ?? [])
 
   useEffect(() => {
     if (wide) setDrawer(false)

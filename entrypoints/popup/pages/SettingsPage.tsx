@@ -9,6 +9,7 @@ import { bgMessager } from '@/lib/messager'
 import { getCustomClient } from '@/lib/auth/oauth'
 import { ClientForm, customClientQueryKey, RedirectUri, SETUP_GUIDE_URL, useClient } from '@/components/extra/ClientForm'
 import { useAccounts } from '@/lib/useAccounts'
+import { addAccount } from '@/lib/accounts'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import {
@@ -35,19 +36,6 @@ import { isPopoutTab } from '../view'
 
 const settingsQueryKey = ['settings']
 const soundQueryKey = ['notificationSound']
-
-// Starts Google's sign-in in the background. In the toolbar popup the call
-// never resolves here: the popup closes as soon as the sign-in window opens,
-// and the background finishes on its own.
-export async function addAccount(loginHint?: string) {
-  try {
-    const email = await bgMessager.sendMessage('addAccount', loginHint)
-    toast.success(`Signed in as ${email}`)
-  } catch (err) {
-    console.error(err)
-    toast.error(`Sign-in failed: ${err instanceof Error ? err.message : String(err)}`)
-  }
-}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (

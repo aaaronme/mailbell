@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQueries } from '@tanstack/react-query'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon, SettingsIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { bgMessager } from '@/lib/messager'
+import { addAccount } from '@/lib/accounts'
 import { OAuthError } from '@/lib/auth/oauth'
 import { useAccounts } from '@/lib/useAccounts'
-import { bootstrapCorrespondents } from '@/lib/mail/correspondents'
+import type { GmailLabel } from '@/lib/api/mailbox'
 import { labelsOptions, useLabels } from '@/lib/mail/queries'
 import { labelTree, SYSTEM_FOLDERS, type LabelNode } from '@/lib/mail/folders'
 import { cn } from '@/lib/utils'
@@ -17,6 +17,9 @@ const route = getRouteApi('/mail')
 // labels.list carries no counts for the other system folders.
 const COUNTED_SYSTEM = new Set(['INBOX', 'SPAM', 'DRAFT'])
 
+const sumInboxUnread = (results: { data?: GmailLabel[] }[]) =>
+  results.reduce((sum, { data }) => sum + (data?.find((it) => it.id === 'INBOX')?.threadsUnread ?? 0), 0)
+
 const ROW = 'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 text-left text-sm transition-colors'
 
 function Entry({
@@ -24,12 +27,15 @@ function Entry({
   onClick,
   count,
   folder,
+  indent = 0,
   children,
 }: {
   active: boolean
   onClick: () => void
   count?: number
   folder?: string
+  // Levels of 12px, for nested labels.
+  indent?: number
   children: React.ReactNode
 }) {
   return (
@@ -37,11 +43,17 @@ function Entry({
       type="button"
       data-folder={folder}
       onClick={onClick}
+      style={indent ? { paddingLeft: 12 + indent * 12 } : undefined}
       className={cn(ROW, active ? 'bg-foreground text-background' : 'text-foreground/70 hover:bg-foreground/5 hover:text-foreground')}
     >
       <span className="min-w-0 flex-1 truncate">{children}</span>
       {!!count && (
-        <span className={cn('tabular-nums', active ? 'text-background/70' : 'text-foreground/40')}>{count}</span>
+        <>
+          <span aria-hidden className={cn('tabular-nums', active ? 'text-background/70' : 'text-foreground/40')}>
+            {count}
+          </span>
+          <span className="sr-only">, {count} unread</span>
+        </>
       )}
     </button>
   )
@@ -53,8 +65,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { data: accounts = [] } = useAccounts()
   const inboxCounts = useQueries({
     queries: accounts.map(({ email }) => labelsOptions(email)),
-    combine: (results) =>
-      results.reduce((sum, { data }) => sum + (data?.find((it) => it.id === 'INBOX')?.threadsUnread ?? 0), 0),
+    combine: sumInboxUnread,
   })
 
   // Dropping q and thread: a new folder starts a fresh list.
@@ -64,7 +75,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   }
 
   return (
-    <nav data-testid="sidebar" className="flex min-h-full flex-col py-2">
+    <nav data-testid="sidebar" aria-label="Mailboxes" className="flex min-h-full flex-col py-2">
       <Entry
         active={search.account === 'all' && search.folder === 'INBOX'}
         count={inboxCounts}
@@ -86,7 +97,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         >
           <SettingsIcon /> Settings
         </Button>
-        <Button variant="ghost" className="justify-start px-3" onClick={() => void bgMessager.sendMessage('addAccount', undefined)}>
+        <Button variant="ghost" className="justify-start px-3" onClick={() => void addAccount()}>
           <PlusIcon /> Add account
         </Button>
       </div>
@@ -106,10 +117,6 @@ function AccountSection({
   const [expanded, setExpanded] = useState(true)
   const labels = useLabels(email)
 
-  useEffect(() => {
-    bootstrapCorrespondents(email).catch(() => {})
-  }, [email])
-
   const countOf = (id: string) => labels.data?.find((it) => it.id === id)?.threadsUnread
   const isActive = (folder: string) => search.account === email && search.folder === folder
 
@@ -117,19 +124,28 @@ function AccountSection({
     <section data-account={email} className="mt-3">
       <button
         type="button"
+        aria-expanded={expanded}
         onClick={() => setExpanded(!expanded)}
         className="flex h-8 w-full cursor-pointer items-center gap-1 px-3 text-left text-xs text-foreground/40 transition-colors hover:text-foreground"
       >
         {expanded ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
         <span className="truncate">{email}</span>
       </button>
+      {labels.error instanceof OAuthError && (
+        <Button variant="ghost" size="sm" className="mx-3" onClick={() => void addAccount(email)}>
+          Reconnect
+        </Button>
+      )}
+      {labels.isError && !(labels.error instanceof OAuthError) && (
+        <div className="flex items-center gap-2 px-3 text-xs text-foreground/40">
+          Couldn't load labels
+          <Button variant="ghost" size="sm" onClick={() => void labels.refetch()}>
+            Retry
+          </Button>
+        </div>
+      )}
       {expanded && (
         <>
-          {labels.error instanceof OAuthError && (
-            <Button variant="ghost" size="sm" className="mx-3" onClick={() => void bgMessager.sendMessage('addAccount', email)}>
-              Reconnect
-            </Button>
-          )}
           {SYSTEM_FOLDERS.map(({ id, name }) => (
             <Entry
               key={id}
@@ -175,21 +191,22 @@ function LabelRow({
   const active = !!node.id && isActive(node.id)
   return (
     <>
-      <div className="flex items-center">
-        <span style={{ marginLeft: depth * 12 }} className="flex h-8 w-5 shrink-0 items-center justify-center">
-          {hasChildren && (
-            <button
-              type="button"
-              aria-label={`${expanded ? 'Collapse' : 'Expand'} ${node.name}`}
-              onClick={() => setExpanded(!expanded)}
-              className="cursor-pointer text-foreground/40 transition-colors hover:text-foreground"
-            >
-              {expanded ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
-            </button>
-          )}
-        </span>
+      <div className="relative flex items-center">
+        {hasChildren && (
+          <button
+            type="button"
+            aria-label={`${expanded ? 'Collapse' : 'Expand'} ${node.name}`}
+            aria-expanded={expanded}
+            onClick={() => setExpanded(!expanded)}
+            style={{ left: depth * 12 }}
+            className="absolute z-10 flex h-8 w-3 cursor-pointer items-center justify-center text-foreground/40 transition-colors hover:text-foreground"
+          >
+            {expanded ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
+          </button>
+        )}
         <Entry
           active={active}
+          indent={depth}
           count={node.id ? countOf(node.id) : undefined}
           // A prefix-only parent has no mail of its own; it just folds its children.
           onClick={() => (node.id ? onOpen(node.id) : setExpanded(!expanded))}

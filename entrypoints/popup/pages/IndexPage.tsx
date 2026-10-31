@@ -35,7 +35,7 @@ import type { EmailThread } from '@/lib/StateManager'
 import { getThreadCode } from '@/lib/otp'
 import { MailActions, urlsFromSender } from '@/components/extra/MailActions'
 import { useAccounts } from '@/lib/useAccounts'
-import { addAccount } from './SettingsPage'
+import { addAccount } from '@/lib/accounts'
 import { useShortcuts } from '@/lib/useShortcuts'
 
 function MailItem({

@@ -1,5 +1,5 @@
 import { ClientForm, RedirectUri, SETUP_GUIDE_URL } from '@/components/extra/ClientForm'
-import { addAccount } from './SettingsPage'
+import { addAccount } from '@/lib/accounts'
 
 function Link({ href, children }: { href: string; children: React.ReactNode }) {
   return (
