@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
-import { ArchiveIcon, MailCheckIcon, MailIcon, OctagonAlertIcon, Trash2Icon, XIcon } from 'lucide-react'
+import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
+  InboxIcon,
+  MailCheckIcon,
+  MailIcon,
+  OctagonAlertIcon,
+  Trash2Icon,
+  XIcon,
+  type LucideIcon,
+} from 'lucide-react'
 import { PageTitle } from '@/components/extra/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,10 +21,9 @@ import { useQueries } from '@tanstack/react-query'
 import { correspondentsOptions } from '@/lib/mail/correspondents'
 import { useAccounts } from '@/lib/useAccounts'
 import { useLabels, useThreadList } from '@/lib/mail/queries'
-import type { MailAction } from '@/lib/mail/actions'
-import { runUndoable } from '@/lib/mail/undo'
 import { cn } from '@/lib/utils'
 import { ThreadListRow } from './ThreadListRow'
+import type { MailActions } from './useMailActions'
 
 const route = getRouteApi('/mail')
 
@@ -29,19 +38,29 @@ const CATEGORY_NAME: Record<Category, string> = {
 }
 const OPTIONAL_CATEGORIES = (['social', 'promotions', 'updates', 'forums'] as const)
 
-const BULK: { label: string; icon: typeof XIcon; action: MailAction; removes: boolean }[] = [
-  { label: 'Archive', icon: ArchiveIcon, action: { kind: 'archive' }, removes: true },
-  { label: 'Delete', icon: Trash2Icon, action: { kind: 'trash' }, removes: true },
-  { label: 'Spam', icon: OctagonAlertIcon, action: { kind: 'spam' }, removes: true },
-  { label: 'Read', icon: MailCheckIcon, action: { kind: 'read' }, removes: false },
-  { label: 'Unread', icon: MailIcon, action: { kind: 'unread' }, removes: false },
-]
+// The same folder-aware actions as the reading pane and the keys; they act
+// on the checked threads whenever there are any.
+function bulkButtons(actions: MailActions, folder: string): { label: string; icon: LucideIcon; run: () => unknown }[] {
+  return [
+    ...(actions.canArchive ? [{ label: 'Archive', icon: ArchiveIcon, run: actions.archive }] : []),
+    folder === 'TRASH'
+      ? { label: 'Restore', icon: ArchiveRestoreIcon, run: actions.trash }
+      : { label: 'Delete', icon: Trash2Icon, run: actions.trash },
+    folder === 'SPAM'
+      ? { label: 'Not spam', icon: InboxIcon, run: actions.spam }
+      : { label: 'Spam', icon: OctagonAlertIcon, run: actions.spam },
+    { label: 'Read', icon: MailCheckIcon, run: () => actions.run({ kind: 'read' }) },
+    { label: 'Unread', icon: MailIcon, run: () => actions.run({ kind: 'unread' }) },
+  ]
+}
 
 export function ThreadList({
+  actions,
   checked,
   onCheckedChange,
   searchRef,
 }: {
+  actions: MailActions
   checked: Set<string>
   onCheckedChange: (next: Set<string>) => void
   searchRef: React.RefObject<HTMLInputElement | null>
@@ -116,11 +135,6 @@ export function ThreadList({
     onCheckedChange(out)
   }
 
-  const runBulk = async (action: MailAction, removes: boolean) => {
-    const ok = await runUndoable(action, targets)
-    if (ok && removes) onCheckedChange(new Set())
-  }
-
   const showTabs =
     folder === 'INBOX' &&
     !q &&
@@ -135,14 +149,14 @@ export function ThreadList({
       {targets.length > 0 ? (
         <div className="flex h-12 shrink-0 items-center gap-1 border-b border-foreground/10 px-2">
           <span className="min-w-0 flex-1 truncate px-2 text-sm">{targets.length} selected</span>
-          {BULK.map((it) => (
+          {bulkButtons(actions, folder).map((it) => (
             <Button
               key={it.label}
               variant="ghost"
               size="icon"
               title={it.label}
               aria-label={it.label}
-              onClick={() => void runBulk(it.action, it.removes)}
+              onClick={() => void it.run()}
             >
               <it.icon />
             </Button>

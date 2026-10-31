@@ -107,8 +107,9 @@ export const actionVerb = (a: MailAction): string => ACTION_WORDS[a.kind](a).ver
 export function removesFromFolder(a: MailAction, folder: string): boolean {
   if (folder === 'ALL') return false
   switch (a.kind) {
+    // Archiving drops only INBOX: Starred, labels and Sent still hold the thread.
     case 'archive':
-      return true
+      return folder === 'INBOX'
     case 'trash':
       return folder !== 'TRASH'
     case 'spam':

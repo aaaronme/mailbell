@@ -80,6 +80,8 @@ describe('actions', () => {
   it('knows which actions remove a row from a folder', () => {
     expect(mod.removesFromFolder({ kind: 'archive' }, 'INBOX')).toBe(true)
     expect(mod.removesFromFolder({ kind: 'archive' }, 'ALL')).toBe(false)
+    expect(mod.removesFromFolder({ kind: 'archive' }, 'STARRED')).toBe(false)
+    expect(mod.removesFromFolder({ kind: 'archive' }, 'Label_1')).toBe(false)
     expect(mod.removesFromFolder({ kind: 'trash' }, 'TRASH')).toBe(false)
     expect(mod.removesFromFolder({ kind: 'spam' }, 'SPAM')).toBe(false)
     expect(mod.removesFromFolder({ kind: 'restore' }, 'TRASH')).toBe(true)
@@ -177,7 +179,20 @@ describe('actions', () => {
     seed([row('A'), row('B')], labelKey)
     await mod.applyAction({ kind: 'archive' }, [target('A')])
     expect(cachedIds(allKey)).toEqual(['B'])
-    expect(cachedIds(labelKey)).toEqual(['B'])
+    // Archiving only leaves the Inbox; the label still holds the thread.
+    expect(cachedIds(labelKey)).toEqual(['A', 'B'])
+  })
+
+  it('archiving in Starred leaves the Starred row, without INBOX', async () => {
+    const starredKey = mailKeys.list('me@gmail.com', 'STARRED', { labelIds: ['STARRED'], includeSpamTrash: false })
+    seed([row('A', 'me@gmail.com', ['INBOX', 'STARRED']), row('B')], starredKey)
+    seed([row('A'), row('B')])
+    await mod.applyAction({ kind: 'archive' }, [target('A')])
+    expect(cachedIds(starredKey)).toEqual(['A', 'B'])
+    expect(queryClient.getQueryData<{ pages: { rows: ThreadRow[] }[] }>(starredKey)!.pages[0]!.rows[0]!.labelIds).toEqual([
+      'STARRED',
+    ])
+    expect(cachedIds()).toEqual(['B'])
   })
 
   it('archiving in All inboxes patches the per-account pages, and undo restores them', async () => {

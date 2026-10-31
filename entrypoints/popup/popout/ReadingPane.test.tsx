@@ -109,6 +109,15 @@ describe('ReadingPane', () => {
     expect(pane().querySelector('[title^="Delete"]')).toBeNull()
   })
 
+  it('has no Archive in Trash or Spam', async () => {
+    for (const folder of ['TRASH', 'SPAM']) {
+      document.body.innerHTML = ''
+      await mount(at(folder, 't1'))
+      await expect.element(page.getByTitle('Mark unread (Shift+U)')).toBeInTheDocument()
+      expect(pane().querySelector('[title^="Archive"]')).toBeNull()
+    }
+  })
+
   it('shows Not spam in place of Spam in Spam', async () => {
     const { screen } = await mount(at('SPAM', 't1'))
     await expect.element(screen.getByTitle('Not spam')).toBeInTheDocument()

@@ -54,12 +54,18 @@ export function useMailActions({
     if (url && gone.has(url) && router.state.location.search.thread === url) advance(url, gone)
   }
 
+  // Trash and Spam have no Inbox to archive out of.
+  const canArchive = folder !== 'TRASH' && folder !== 'SPAM'
+
   return {
     run,
     targets,
     everyHas,
     starred,
-    archive: () => run({ kind: 'archive' }),
+    canArchive,
+    archive: async () => {
+      if (canArchive) await run({ kind: 'archive' })
+    },
     trash: () => run({ kind: folder === 'TRASH' ? 'restore' : 'trash' }),
     spam: () => run({ kind: folder === 'SPAM' ? 'notSpam' : 'spam' }),
     toggleStar: () => run({ kind: starred ? 'unstar' : 'star' }),

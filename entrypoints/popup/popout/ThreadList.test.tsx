@@ -208,6 +208,28 @@ describe('ThreadList', () => {
     await expect.element(screen.getByText('2 selected')).not.toBeInTheDocument()
   })
 
+  it('bulk Restore untrashes in Trash, with no Delete or Archive', async () => {
+    const { screen } = await mount(`account=${A}&folder=TRASH&cat=primary`)
+    await vi.waitFor(() => expect(rows()).toHaveLength(50))
+    document.querySelector<HTMLInputElement>('[aria-label="Select Subject 1"]')!.click()
+    await expect.element(screen.getByRole('button', { name: 'Restore' })).toBeInTheDocument()
+    const bar = screen.getByText('1 selected').element().parentElement!
+    expect(bar.querySelector('[aria-label="Delete"], [aria-label="Archive"]')).toBeNull()
+    await screen.getByRole('button', { name: 'Restore' }).click()
+    await vi.waitFor(() => expect(actionRequests).toEqual(['/threads/t1/untrash']))
+  })
+
+  it('bulk Not spam in Spam, with no Spam or Archive', async () => {
+    const { screen } = await mount(`account=${A}&folder=SPAM&cat=primary`)
+    await vi.waitFor(() => expect(rows()).toHaveLength(50))
+    document.querySelector<HTMLInputElement>('[aria-label="Select Subject 1"]')!.click()
+    await expect.element(screen.getByRole('button', { name: 'Not spam' })).toBeInTheDocument()
+    const bar = screen.getByText('1 selected').element().parentElement!
+    expect(bar.querySelector('[aria-label="Spam"], [aria-label="Archive"]')).toBeNull()
+    await screen.getByRole('button', { name: 'Not spam' }).click()
+    await vi.waitFor(() => expect(actionRequests).toEqual(['/threads/t1/modify']))
+  })
+
   it('keeps the selection when the bulk action fails', async () => {
     const { screen } = await mount()
     await vi.waitFor(() => expect(rows()).toHaveLength(50))

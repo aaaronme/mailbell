@@ -132,6 +132,16 @@ describe('popout shortcuts', () => {
     )
   })
 
+  it('e does nothing in Trash or Spam', async () => {
+    for (const folder of ['TRASH', 'SPAM']) {
+      document.body.innerHTML = ''
+      await mount(`account=${A}&folder=${folder}&thread=${encodeURIComponent(url('B'))}&cat=primary`)
+      await userEvent.keyboard('e')
+      await new Promise((r) => setTimeout(r, 50))
+      expect(runUndoable).not.toHaveBeenCalled()
+    }
+  })
+
   it('# restores in Trash', async () => {
     await mount(`account=${A}&folder=TRASH&thread=${encodeURIComponent(url('B'))}&cat=primary`)
     await userEvent.keyboard('#')

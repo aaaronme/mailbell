@@ -42,7 +42,6 @@ export function MailRoute() {
   const [drawer, setDrawer] = useState(false)
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const searchRef = useRef<HTMLInputElement>(null)
-  const list = { checked, onCheckedChange: setChecked, searchRef }
   const [sheet, setSheet] = useState(false)
   const [labelMenu, setLabelMenu] = useState<LabelMenu>(null)
   const readingRef = useRef<HTMLDivElement>(null)
@@ -68,6 +67,7 @@ export function MailRoute() {
   // Unknown until loaded: nothing is marked on a guess.
   const { engage, keepUnread } = useMarkRead(useOpenThread(thread).data, settings?.markRead ?? 'manual')
   const actions = useMailActions({ checked, onCheckedChange: setChecked, keepUnread })
+  const list = { actions, checked, onCheckedChange: setChecked, searchRef }
   usePopoutShortcuts({
     rows,
     search,

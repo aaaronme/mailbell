@@ -74,7 +74,7 @@ export function ReadingPane({
   return (
     <div data-testid="reading-pane" className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-12 shrink-0 items-center gap-1 border-b border-foreground/10 px-2">
-        <BarButton title="Archive (e)" icon={ArchiveIcon} onClick={() => void actions.archive()} />
+        {actions.canArchive && <BarButton title="Archive (e)" icon={ArchiveIcon} onClick={() => void actions.archive()} />}
         {folder === 'TRASH' ? (
           <BarButton title="Restore" icon={ArchiveRestoreIcon} onClick={() => void actions.trash()} />
         ) : (
