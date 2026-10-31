@@ -26,6 +26,11 @@ export interface Settings {
   // By address; an account without an entry uses the defaults.
   accounts: Record<string, AccountSettings>
   pollMinutes: number
+  // When opening a mail marks it read.
+  markRead: 'delay' | 'immediate' | 'manual'
+  // Remote images and styles in mail: 'ask' blocks them until the user allows
+  // it for a message or trusts the sender.
+  remoteImages: 'ask' | 'always' | 'replied'
 }
 
 const STORAGE_KEY = 'settings'
@@ -36,6 +41,8 @@ const DEFAULTS: Settings = {
   quietHours: { enabled: false, start: '22:00', end: '07:00' },
   accounts: {},
   pollMinutes: 0.5,
+  markRead: 'delay',
+  remoteImages: 'ask',
 }
 const DEFAULT_ACCOUNT: AccountSettings = { notifications: true }
 

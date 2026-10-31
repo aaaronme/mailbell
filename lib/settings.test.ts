@@ -8,7 +8,13 @@ describe('settings', () => {
   beforeEach(() => fakeBrowser.reset())
 
   it('defaults until changed, then keeps the other settings', async () => {
-    expect(await getSettings()).toMatchObject({ notifications: true, pollMinutes: 0.5, accounts: {} })
+    expect(await getSettings()).toMatchObject({
+      notifications: true,
+      pollMinutes: 0.5,
+      accounts: {},
+      markRead: 'delay',
+      remoteImages: 'ask',
+    })
     await updateSettings({ pollMinutes: 5 })
     await updateSettings({ notifications: false })
     await updateAccountSettings('a@gmail.com', { sound: 'ping' })
