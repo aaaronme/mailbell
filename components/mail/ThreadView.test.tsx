@@ -163,6 +163,7 @@ describe('ThreadView', () => {
     await vi.waitFor(async () => expect((await getCorrespondents(ACCOUNT)).has('bob@example.com')).toBe(true))
     await vi.waitFor(() => expect(client.getQueryData(['correspondents', ACCOUNT])).toBeDefined())
     const set = vi.spyOn(fakeBrowser.storage.local, 'set')
+    set.mockClear()
     await view.rerender(wrap(make(), client))
     await new Promise((r) => setTimeout(r, 100))
     expect(set).not.toHaveBeenCalled()
@@ -225,5 +226,18 @@ describe('ThreadView', () => {
     const view = await renderView(thread({ from: `Me <${ACCOUNT}>`, labels: ['SPAM', 'SENT'], html: '<p>Hi</p>' }))
     await expect.element(view.getByText('Hi')).toBeVisible()
     await expect.element(view.getByRole('button', { name: 'Show formatted' })).not.toBeInTheDocument()
+  })
+
+  it('ignores empty recipients when recording correspondents', async () => {
+    await fakeBrowser.storage.local.set({ correspondents: { [ACCOUNT]: ['bob@example.com'] } })
+    const client = new QueryClient()
+    const t = thread({ from: `Me <${ACCOUNT}>`, to: 'bob@example.com' })
+    t.messages[0]!.to = ['bob@example.com', '  ']
+    await render(wrap(t, client))
+    await vi.waitFor(() => expect(client.getQueryData(['correspondents', ACCOUNT])).toBeDefined())
+    const set = vi.spyOn(fakeBrowser.storage.local, 'set')
+    set.mockClear()
+    await new Promise((r) => setTimeout(r, 100))
+    expect(set.mock.calls.filter(([items]) => 'correspondents' in items)).toEqual([])
   })
 })

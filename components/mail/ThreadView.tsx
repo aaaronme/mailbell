@@ -17,7 +17,7 @@ import { bgMessager } from '@/lib/messager'
 import { replyRecipients } from '@/lib/reply'
 import { addToCalendarUrl, findMeetingLink, formatEventTime } from '@/lib/calendar'
 import { useShortcuts } from '@/lib/useShortcuts'
-import { addCorrespondents, useCorrespondents } from '@/lib/mail/correspondents'
+import { addCorrespondents, normaliseEmails, useCorrespondents } from '@/lib/mail/correspondents'
 import { registrableDomain } from '@/lib/mail/identity'
 import { suspicionOf, type SuspicionReason } from '@/lib/mail/suspicion'
 import { SenderHeader } from './SenderHeader'
@@ -269,9 +269,11 @@ export function ThreadView(props: {
   const known = correspondents.data
   useEffect(() => {
     if (!known) return
-    const recipients = thread.messages
-      .filter((it) => it.senderEmail.toLowerCase() === mine)
-      .flatMap((it) => [...it.to, ...it.cc].map((to) => parseMailbox(to).email.toLowerCase()))
+    const recipients = normaliseEmails(
+      thread.messages
+        .filter((it) => it.senderEmail.toLowerCase() === mine)
+        .flatMap((it) => [...it.to, ...it.cc].map((to) => parseMailbox(to).email)),
+    )
     // Writing only what is new keeps a refetch of the same thread from writing.
     if (!recipients.some((it) => !known.has(it))) return
     void addCorrespondents(thread.account, recipients).then(() =>

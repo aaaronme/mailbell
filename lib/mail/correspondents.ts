@@ -23,10 +23,14 @@ function serialised<T>(run: () => Promise<T>): Promise<T> {
   return result
 }
 
+// What addCorrespondents stores: trimmed, lower-case, no empties.
+export const normaliseEmails = (emails: string[]) =>
+  emails.map((it) => it.trim().toLowerCase()).filter(Boolean)
+
 export function addCorrespondents(account: string, emails: string[]): Promise<void> {
   return serialised(async () => {
     const all = await readAll()
-    const added = emails.map((it) => it.trim().toLowerCase()).filter(Boolean)
+    const added = normaliseEmails(emails)
     const addedSet = new Set(added)
     // Re-adding moves an address to the newest end, so the cap drops the stalest.
     const kept = (all[account] ?? []).filter((it) => !addedSet.has(it))
