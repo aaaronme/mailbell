@@ -128,12 +128,16 @@ export function useThreadList(search: MailSearch): ThreadListResult {
   }
 }
 
-export function useOpenThread(url?: string) {
+// Shared with usePreload so a preloaded thread lands under the key the open
+// view reads.
+export const threadOptions = (url?: string) => {
   const parsed = url ? parseThreadUrl(url) : null
-  return useQuery({
+  return queryOptions({
     queryKey: mailKeys.thread(parsed?.account ?? '', parsed?.threadId ?? ''),
     queryFn: () => getOpenThread(parsed!.account, parsed!.threadId),
     enabled: !!parsed,
     staleTime: 60_000,
   })
 }
+
+export const useOpenThread = (url?: string) => useQuery(threadOptions(url))

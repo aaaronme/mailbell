@@ -1,0 +1,161 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { render } from 'vitest-browser-react'
+import { page } from 'vitest/browser'
+import { fakeBrowser } from '@webext-core/fake-browser'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { RouterProvider } from '@tanstack/react-router'
+
+vi.stubGlobal('browser', fakeBrowser)
+vi.stubGlobal('chrome', fakeBrowser)
+vi.mock('@/lib/mail/undo', () => ({
+  runUndoable: vi.fn(async () => true),
+  runSilent: vi.fn(async () => undefined),
+}))
+
+const { createAppRouter } = await import('../router')
+const { setTokenSource, threadUrl } = await import('@/lib/api/gmail')
+const { runUndoable, runSilent } = await import('@/lib/mail/undo')
+
+const A = 'a@example.com'
+let threadLabels = ['INBOX', 'UNREAD']
+let labels: object[] = []
+
+const json = (body: object) => new Response(JSON.stringify(body))
+
+function stubFetch() {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: string) => {
+      const path = new URL(input).pathname.replace(/^.*\/gmail\/v1\/users\/me/, '')
+      if (path === '/threads') return json({ threads: ['t0', 't1', 't2', 't3'].map((id) => ({ id })) })
+      if (path.startsWith('/threads/')) {
+        const id = path.slice('/threads/'.length)
+        return json({
+          id,
+          snippet: 's',
+          messages: [
+            {
+              id: `m${id}`,
+              labelIds: threadLabels,
+              snippet: 's',
+              internalDate: String(Date.now()),
+              payload: { headers: [{ name: 'From', value: 'Bob <bob@example.org>' }, { name: 'Subject', value: id }] },
+            },
+          ],
+        })
+      }
+      if (path === '/labels') return json({ labels })
+      return json({})
+    }),
+  )
+}
+
+async function mount(search: string) {
+  await page.viewport(1200, 800)
+  window.location.hash = `#/mail?${search}`
+  const router = createAppRouter([`/mail?${search}`], { popout: true })
+  const screen = await render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  )
+  return { router, screen }
+}
+
+const open = (id: string) => `thread=${encodeURIComponent(threadUrl(A, id))}`
+// The runner appends a query to the hash, which must land on `cat`.
+const at = (folder: string, id: string) => `account=${A}&folder=${folder}&${open(id)}&cat=primary`
+const pane = () => document.querySelector('[data-testid="reading-pane"]') as HTMLElement
+const rowCount = () => document.querySelectorAll('[data-testid="thread-list"] [data-row]').length
+
+describe('ReadingPane', () => {
+  beforeEach(async () => {
+    fakeBrowser.reset()
+    vi.restoreAllMocks()
+    vi.mocked(runUndoable).mockClear()
+    vi.mocked(runSilent).mockClear()
+    vi.spyOn(fakeBrowser.identity, 'getRedirectURL').mockReturnValue('https://x.extensions.allizom.org/')
+    await browser.storage.local.set({ oauthAccounts: [{ email: A, refreshToken: 'r', accessToken: 't', expiresAt: 0 }] })
+    setTokenSource(async (account) => account)
+    threadLabels = ['INBOX', 'UNREAD']
+    labels = [
+      { id: 'INBOX', name: 'INBOX', type: 'system' },
+      { id: 'Label_1', name: 'Work', type: 'user' },
+    ]
+    stubFetch()
+  })
+
+  it('shows the empty state without a thread', async () => {
+    const { screen } = await mount(`account=${A}&folder=INBOX&cat=primary`)
+    const empty = screen.getByText('No conversation selected')
+    await expect.element(empty).toBeInTheDocument()
+    expect(empty.element().className).toContain('text-foreground/40')
+  })
+
+  it('shows Restore, not Delete, in Trash', async () => {
+    const { screen } = await mount(at('TRASH', 't1'))
+    await expect.element(screen.getByTitle('Restore')).toBeInTheDocument()
+    expect(pane().querySelector('[title^="Delete"]')).toBeNull()
+  })
+
+  it('shows Not spam in place of Spam in Spam', async () => {
+    const { screen } = await mount(at('SPAM', 't1'))
+    await expect.element(screen.getByTitle('Not spam')).toBeInTheDocument()
+    expect(pane().querySelector('[title^="Spam"]')).toBeNull()
+  })
+
+  it('archives and selects the next row', async () => {
+    const { screen, router } = await mount(at('INBOX', 't1'))
+    await vi.waitFor(() => expect(rowCount()).toBe(4))
+    await screen.getByTitle('Archive (e)').click()
+    await vi.waitFor(() =>
+      expect(runUndoable).toHaveBeenCalledWith({ kind: 'archive' }, [
+        { account: A, threadId: 't1', url: threadUrl(A, 't1') },
+      ]),
+    )
+    await vi.waitFor(() => expect(router.state.location.search.thread).toBe(threadUrl(A, 't2')))
+  })
+
+  it('selects the previous row at the end of the list', async () => {
+    const { screen, router } = await mount(at('INBOX', 't3'))
+    await vi.waitFor(() => expect(rowCount()).toBe(4))
+    await screen.getByTitle('Archive (e)').click()
+    await vi.waitFor(() => expect(router.state.location.search.thread).toBe(threadUrl(A, 't2')))
+  })
+
+  it('acts on the checked threads when there are any', async () => {
+    await mount(at('INBOX', 't0'))
+    await vi.waitFor(() => expect(rowCount()).toBe(4))
+    const boxes = document.querySelectorAll<HTMLElement>('[data-testid="thread-list"] input[type="checkbox"]')
+    expect(boxes.length).toBe(4)
+    for (const box of [...boxes].slice(1)) box.click()
+    await vi.waitFor(() => expect(document.body.textContent).toContain('3 selected'))
+    pane().querySelector<HTMLElement>('[title="Archive (e)"]')!.click()
+    await vi.waitFor(() => expect(runUndoable).toHaveBeenCalled())
+    expect(vi.mocked(runUndoable).mock.calls.at(-1)![1]).toHaveLength(3)
+  })
+
+  it('reaches Gmail only through the overflow menu', async () => {
+    const { screen } = await mount(at('INBOX', 't1'))
+    await expect.element(screen.getByTitle('More')).toBeInTheDocument()
+    expect(pane().querySelector('a[href^="https://mail.google.com"]')).toBeNull()
+    const create = vi.spyOn(fakeBrowser.tabs, 'create')
+    await screen.getByTitle('More').click()
+    await page.getByRole('menuitem', { name: 'Open in Gmail' }).click()
+    expect(create).toHaveBeenCalledWith({ url: threadUrl(A, 't1') })
+  })
+
+  it('shows Unstar when starred', async () => {
+    threadLabels = ['INBOX', 'STARRED']
+    const { screen } = await mount(at('INBOX', 't1'))
+    await expect.element(screen.getByTitle('Unstar (s)')).toBeInTheDocument()
+  })
+
+  it('marks read when its scroll container scrolls', async () => {
+    await mount(at('INBOX', 't1'))
+    await vi.waitFor(() => expect(pane().textContent).toContain('Bob'))
+    expect(runSilent).not.toHaveBeenCalled()
+    pane().querySelector('[data-testid="reading-scroll"]')!.dispatchEvent(new Event('scroll'))
+    await vi.waitFor(() => expect(runSilent).toHaveBeenCalledWith({ kind: 'read' }, expect.any(Array)))
+  })
+})

@@ -5,7 +5,10 @@ import { Button } from '@/components/ui/button'
 import { Sidebar } from './Sidebar'
 import { ThreadList } from './ThreadList'
 import { useBootstrapCorrespondents } from './useBootstrapCorrespondents'
+import { ReadingPane } from './ReadingPane'
 import { useAccounts } from '@/lib/useAccounts'
+import { usePreload } from '@/lib/mail/preload'
+import { useThreadList } from '@/lib/mail/queries'
 
 const route = getRouteApi('/mail')
 
@@ -20,11 +23,9 @@ export function useMediaQuery(query: string): boolean {
   )
 }
 
-// Task 13 replaces this.
-const ReadingPane = () => <div data-testid="reading-pane" className="min-h-0 flex-1" />
-
 export function MailRoute() {
-  const { thread } = route.useSearch()
+  const search = route.useSearch()
+  const { thread } = search
   const navigate = useNavigate({ from: '/mail' })
   const wide = useMediaQuery('(min-width: 1000px)')
   const medium = useMediaQuery('(min-width: 700px)')
@@ -32,7 +33,9 @@ export function MailRoute() {
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const searchRef = useRef<HTMLInputElement>(null)
   const list = { checked, onCheckedChange: setChecked, searchRef }
+  const pane = { checked, onCheckedChange: setChecked }
   useBootstrapCorrespondents(useAccounts().data ?? [])
+  usePreload(useThreadList(search).rows, thread)
 
   useEffect(() => {
     if (wide) setDrawer(false)
@@ -56,7 +59,7 @@ export function MailRoute() {
                 <ArrowLeftIcon />
               </Button>
             </div>
-            <ReadingPane />
+            <ReadingPane {...pane} />
           </>
         ) : (
           <ListColumn {...list} onToggleSidebar={() => setDrawer(!drawer)} />
@@ -80,7 +83,7 @@ export function MailRoute() {
         <ListColumn {...list} onToggleSidebar={wide ? undefined : () => setDrawer(!drawer)} />
       </div>
       <div className="flex min-h-0 flex-col">
-        <ReadingPane />
+        <ReadingPane {...pane} />
       </div>
       {!wide && drawer && <SidebarOverlay onClose={() => setDrawer(false)} />}
     </div>
