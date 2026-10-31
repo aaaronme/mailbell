@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeBrowser } from '@webext-core/fake-browser'
-import { blockCssUrls, getTrustedSenders, isTracker, shouldShowRemote, trustSender, TRACKER_HOSTS } from './remoteContent'
+import { blockCssUrls, isTrackerUrl, getTrustedSenders, isTracker, shouldShowRemote, trustSender, TRACKER_HOSTS } from './remoteContent'
 
 vi.stubGlobal('browser', fakeBrowser)
 
@@ -11,12 +11,17 @@ describe('isTracker', () => {
     expect(isTracker({ src: 'https://a/p.gif', style: 'dis\\70lay: none' })).toBe(true)
     expect(isTracker({ src: 'https://a/p.gif', style: 'visibility:hidden' })).toBe(true)
     expect(isTracker({ src: 'https://a/p.gif', style: 'opacity:0' })).toBe(true)
+    for (const zero of ['0', '0.0', '.0', '0%', '0 !important']) {
+      expect(isTracker({ src: 'https://a/p.gif', style: `opacity:${zero}` })).toBe(true)
+    }
+    expect(isTracker({ src: `https://${TRACKER_HOSTS[0]}./x.png` })).toBe(true)
     expect(isTracker({ src: `https://sub.${TRACKER_HOSTS[0]}/x.png` })).toBe(true)
   })
 
   it('leaves ordinary images alone', () => {
     expect(isTracker({ src: 'https://a/p.png', width: '40', height: '20', style: 'opacity:0.5' })).toBe(false)
     expect(isTracker({ src: 'https://a/p.png', width: '100%' })).toBe(false)
+    expect(isTracker({ src: 'https://a/p.png', width: '1em', height: '0.5in' })).toBe(false)
     expect(isTracker({ src: `https://not${TRACKER_HOSTS[0]}/x.png` })).toBe(false)
   })
 })
@@ -37,9 +42,40 @@ describe('blockCssUrls', () => {
     expect(blocked).toBe(4)
   })
 
+  it('resumes after a bad string, which ends at an unescaped newline', () => {
+    for (const css of [
+      "x:'\n;background-image:url(https://a/x.png)",
+      'a{content:"\n}b{background:url(https://a/x.png)}',
+      'a{background:url("x\n);b:url(https://a/x.png)}',
+      '@import "x\n;a{background:url(https://a/x.png)}',
+    ]) {
+      expect(blockCssUrls(css).css).not.toContain('https://')
+    }
+  })
+
+  it('continues a string over an escaped newline', () => {
+    const css = 'a{content:"x\\\ny;z:url(https://a/x.png)"}'
+    expect(blockCssUrls(css)).toEqual({ css, blocked: 0 })
+  })
+
+  it('in trackers mode only drops urls on tracker hosts', () => {
+    const css = `a{background:url(https://a/b.png)} b{background:url(https://${TRACKER_HOSTS[0]}/t.gif)}`
+    expect(blockCssUrls(css, 'trackers')).toEqual({
+      css: 'a{background:url(https://a/b.png)} b{background:url("")}',
+      blocked: 1,
+    })
+  })
+
   it('keeps data and cid urls', () => {
     const css = 'a{background:url(data:image/png;base64,AAAA)} b{background:url("cid:x")}'
     expect(blockCssUrls(css)).toEqual({ css, blocked: 0 })
+  })
+})
+
+describe('isTrackerUrl', () => {
+  it('matches hosts and subdomains, including protocol-relative urls', () => {
+    expect(isTrackerUrl(`//x.${TRACKER_HOSTS[0]}/o.gif`)).toBe(true)
+    expect(isTrackerUrl('https://example.com/o.gif')).toBe(false)
   })
 })
 

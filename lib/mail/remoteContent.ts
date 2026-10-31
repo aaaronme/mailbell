@@ -1,43 +1,48 @@
 import type { Settings } from '../settings'
 
-// Hosts that serve open-tracking pixels for email platforms. Picked from the
-// public lists kept by the Ugly Email extension and by the PixelBlock and
-// Trocker projects, keeping hosts that serve only tracking. Matches the host
-// and every subdomain of it.
+// Hosts, and the subdomains of them, that serve only email open-tracking
+// pixels or tracking redirects, so nothing a reader wants to see is lost by
+// dropping them. Gathered from what the public tracker lists (Ugly Email,
+// PixelBlock) name; not exhaustive. Platforms that also host content images
+// (mailchimp.com, sendgrid.com, hubspot.com ...) are listed only by their
+// tracking subdomain.
 export const TRACKER_HOSTS = [
-  'mailchimp.com',
   'list-manage.com',
   'mandrillapp.com',
-  'sendgrid.net',
-  'sendgrid.com',
-  'mailgun.org',
-  'hubspot.com',
+  'ct.sendgrid.net',
+  'track.hubspot.com',
   'hubspotemail.net',
-  'hs-analytics.net',
-  'mixmax.com',
+  'track.mixmax.com',
   'mailtrack.io',
-  'yesware.com',
-  'streak.com',
   'getnotify.com',
   'bananatag.com',
-  'cirrusinsight.com',
-  'superhuman.com',
-  'campaign-archive.com',
-  'constantcontact.com',
-  'exacttarget.com',
+  'mailfoogae.appspot.com',
+  'tracking.cirrusinsight.com',
   'returnpath.net',
   'sparkpostmail.com',
-  'postmarkapp.com',
-  'mktdns.com',
-  'tracking.klaviyomail.com',
+  'pstmrk.it',
+  'customeriomail.com',
 ]
 
-const hostOf = (src: string) => {
+// Lower-cased, without the root dot (`host.` is the same host), and reading
+// `//host/x` as a url too.
+function hostOf(src: string) {
+  const url = src.replace(/[\t\n\r]/g, '').trim()
   try {
-    return new URL(src).hostname.toLowerCase()
+    return new URL(url.startsWith('//') ? `https:${url}` : url).hostname.toLowerCase().replace(/\.$/, '')
   } catch {
     return ''
   }
+}
+
+export function isTrackerUrl(url: string): boolean {
+  const host = hostOf(url)
+  return !!host && TRACKER_HOSTS.some((it) => host === it || host.endsWith(`.${it}`))
+}
+
+// Whether any url in free text (a srcset, an @import rule) is a tracker's.
+export function hasTrackerUrl(text: string): boolean {
+  return (decodeCssEscapes(text).match(/(?:https?:)?\/\/[^\s"'()]+/gi) ?? []).some(isTrackerUrl)
 }
 
 export function decodeCssEscapes(css: string): string {
@@ -48,24 +53,24 @@ export function decodeCssEscapes(css: string): string {
   })
 }
 
-// A pixel is 1px or less in either dimension. A percentage says nothing about
-// the size on screen.
+// A pixel is 1px or less in either dimension. Only px and unitless sizes are
+// read: a percentage or em says nothing about the size on screen.
 function tiny(value: string | undefined) {
-  if (!value || value.includes('%')) return false
-  const size = parseFloat(value)
-  return size <= 1
+  const size = /^(\d*\.?\d+)(px)?$/i.exec(value?.trim() ?? '')?.[1]
+  return size !== undefined && parseFloat(size) <= 1
 }
+
+const ZERO = /^(0+(\.0*)?|\.0+)%?$/
 
 export function isTracker(img: { src: string; width?: string; height?: string; style?: string }): boolean {
   if (tiny(img.width) || tiny(img.height)) return true
   const style = decodeCssEscapes(img.style ?? '').toLowerCase()
   if (/(^|;)\s*display\s*:\s*none\b/.test(style) || /(^|;)\s*visibility\s*:\s*hidden\b/.test(style)) return true
-  if (/(^|;)\s*opacity\s*:\s*0(\.0*)?\s*(!important\s*)?(;|$)/.test(style)) return true
+  const opacity = /(^|;)\s*opacity\s*:\s*([^;!]*)/.exec(style)?.[2]?.trim()
+  if (opacity !== undefined && ZERO.test(opacity)) return true
   const width = /(^|;)\s*width\s*:\s*([^;]*)/.exec(style)?.[2]?.trim()
   const height = /(^|;)\s*height\s*:\s*([^;]*)/.exec(style)?.[2]?.trim()
-  if (tiny(width) || tiny(height)) return true
-  const host = hostOf(img.src.trim())
-  return !!host && TRACKER_HOSTS.some((it) => host === it || host.endsWith(`.${it}`))
+  return tiny(width) || tiny(height) || isTrackerUrl(img.src)
 }
 
 // Local data needs no network. Everything else, relative and protocol-relative
@@ -92,11 +97,22 @@ function readIdent(css: string, start: number) {
   return { name: decodeCssEscapes(css.slice(start, i)).toLowerCase(), end: i }
 }
 
+// A string ends at its closing quote, or, as a bad string, at an unescaped
+// newline that is left for the caller: CSS resumes parsing there, so a scanner
+// that read on would see a declaration that the browser sees as live.
 function readString(css: string, start: number) {
-  const quote = css[start]
+  const quote = css.charAt(start)
   let i = start + 1
-  while (i < css.length && css[i] !== quote) i += css[i] === '\\' ? 2 : 1
-  return { value: decodeCssEscapes(css.slice(start + 1, i)), end: Math.min(i + 1, css.length) }
+  while (i < css.length) {
+    const char = css.charAt(i)
+    if (char === quote) return { value: decodeCssEscapes(css.slice(start + 1, i)), end: i + 1, bad: false }
+    if (char === '\n' || char === '\r' || char === '\f') {
+      return { value: decodeCssEscapes(css.slice(start + 1, i)), end: i, bad: true }
+    }
+    // An escaped newline continues the string; CRLF counts as one.
+    i += char === '\\' ? (css.startsWith('\r\n', i + 1) ? 3 : 2) : 1
+  }
+  return { value: decodeCssEscapes(css.slice(start + 1)), end: css.length, bad: false }
 }
 
 // The index just past the ")" that closes the "(" before `start`.
@@ -119,8 +135,10 @@ function skipParens(css: string, start: number) {
 // url(), src(), image-set() and @import are how CSS fetches things. This
 // scans tokens rather than pattern-matching text so that escapes (`u\rl(`),
 // comments and quoting can't hide one. Any url that isn't data: or cid: is
-// replaced, relative ones too.
-export function blockCssUrls(css: string): { css: string; blocked: number } {
+// replaced, relative ones too. In 'trackers' mode, for mail the user allowed
+// remote content in, only urls on TRACKER_HOSTS are.
+export function blockCssUrls(css: string, mode: 'all' | 'trackers' = 'all'): { css: string; blocked: number } {
+  const bad = (url: string) => (mode === 'all' ? !isLocalUrl(url) && !url.trim().startsWith('#') : isTrackerUrl(url))
   let out = ''
   let blocked = 0
   let i = 0
@@ -145,8 +163,10 @@ export function blockCssUrls(css: string): { css: string; blocked: number } {
           else if (css[j] === '(') j = skipParens(css, j + 1)
           else j += css[j] === '\\' ? 2 : 1
         }
-        blocked++
-        i = Math.min(j + 1, css.length)
+        const rule = css.slice(i, Math.min(j + 1, css.length))
+        if (mode === 'all' || hasTrackerUrl(rule)) blocked++
+        else out += rule
+        i += rule.length
       } else {
         out += css.slice(i, end)
         i = end
@@ -164,14 +184,16 @@ export function blockCssUrls(css: string): { css: string; blocked: number } {
           const string = readString(css, j)
           value = string.value
           j = string.end
-          while (j < css.length && css[j] !== ')') j++
-          j++
+          if (!string.bad) {
+            while (j < css.length && css[j] !== ')') j++
+            j++
+          }
         } else {
           const close = skipParens(css, j)
           value = decodeCssEscapes(css.slice(j, close - 1))
           j = close
         }
-        if (isLocalUrl(value)) out += css.slice(i, j)
+        if (!bad(value)) out += css.slice(i, j)
         else {
           out += 'url("")'
           blocked++
@@ -180,9 +202,12 @@ export function blockCssUrls(css: string): { css: string; blocked: number } {
       } else if (name === 'image-set' || name === '-webkit-image-set' || name === 'cross-fade' || name === '-webkit-cross-fade') {
         // Takes bare strings as urls, so there's no telling a local one apart
         // cheaply.
-        out += 'url("")'
-        blocked++
-        i = skipParens(css, end + 1)
+        const close = skipParens(css, end + 1)
+        if (mode === 'all' || hasTrackerUrl(css.slice(end + 1, close))) {
+          out += 'url("")'
+          blocked++
+        } else out += css.slice(i, close)
+        i = close
       } else {
         out += css.slice(i, end + 1)
         i = end + 1

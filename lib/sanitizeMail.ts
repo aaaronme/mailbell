@@ -1,5 +1,5 @@
 import DOMPurify from 'dompurify'
-import { blockCssUrls, isLocalUrl, isTracker } from './mail/remoteContent'
+import { blockCssUrls, isLocalUrl, isTracker, isTrackerUrl } from './mail/remoteContent'
 
 // Its own instance, so the hooks below apply to mail only.
 const purify = DOMPurify()
@@ -10,20 +10,17 @@ const purify = DOMPurify()
 let current: { remote: boolean; blocked: number } | null = null
 
 const MEDIA = new Set(['img', 'source', 'audio', 'video', 'track'])
-// SVG elements that fetch what their href names; <a> only navigates.
-const SVG_FETCHERS = new Set(['image', 'feimage', 'use'])
+const SVG_NS = 'http://www.w3.org/2000/svg'
 
-// Whether any candidate of a srcset is not local. Candidates are runs of
-// non-space after whitespace or commas, so a data: url may itself hold commas.
-function srcsetIsRemote(srcset: string) {
+// Whether any candidate of a srcset matches. Candidates are runs of non-space
+// after whitespace or commas, so a data: url may itself hold commas.
+function srcsetHas(srcset: string, test: (url: string) => boolean) {
   let rest = srcset
   while (true) {
     rest = rest.replace(/^[\s,]+/, '')
     if (!rest) return false
-    const url = /^\S+/.exec(rest)![0]
-    if (!isLocalUrl(url)) return true
-    const descriptors = /^\S+\s*([^,]*)/.exec(rest)!
-    rest = rest.slice(descriptors[0].length)
+    if (test(/^\S+/.exec(rest)![0])) return true
+    rest = rest.slice(/^\S+\s*([^,]*)/.exec(rest)![0].length)
   }
 }
 
@@ -38,6 +35,8 @@ purify.addHook('afterSanitizeAttributes', (node) => {
   }
   if (!current || !(node instanceof Element)) return
 
+  // Ours to write, never the sender's.
+  node.removeAttribute('data-remote-src')
   const tag = node.localName.toLowerCase()
   if (
     tag === 'img' &&
@@ -51,21 +50,26 @@ purify.addHook('afterSanitizeAttributes', (node) => {
     node.remove()
     return
   }
-  if (current.remote) return
 
+  // Without remote, anything not local is out; with it, only trackers' urls.
+  const { remote } = current
+  const bad = (url: string) => (remote ? isTrackerUrl(url) : !isLocalUrl(url))
+  const badRef = (url: string) => (remote ? isTrackerUrl(url) : !url.startsWith('#') && !isLocalUrl(url))
   let hit = false
+  // Informational only: Task 6 restores by sanitizing again with remote set,
+  // never by reading this back.
   const remember = (value: string) => {
-    if (!node.hasAttribute('data-remote-src')) node.setAttribute('data-remote-src', value)
+    if (!remote && !node.hasAttribute('data-remote-src')) node.setAttribute('data-remote-src', value)
   }
   if (MEDIA.has(tag)) {
     const src = node.getAttribute('src')
-    if (src && !isLocalUrl(src)) {
+    if (src && bad(src)) {
       remember(src)
       node.removeAttribute('src')
       hit = true
     }
     const srcset = node.getAttribute('srcset')
-    if (srcset && srcsetIsRemote(srcset)) {
+    if (srcset && srcsetHas(srcset, bad)) {
       remember(srcset)
       node.removeAttribute('srcset')
       hit = true
@@ -73,29 +77,46 @@ purify.addHook('afterSanitizeAttributes', (node) => {
   }
   for (const attr of ['poster', 'background']) {
     const value = node.getAttribute(attr)
-    if (value && !isLocalUrl(value)) {
+    if (value && bad(value)) {
       node.removeAttribute(attr)
       hit = true
     }
   }
-  if (SVG_FETCHERS.has(tag)) {
-    for (const attr of ['href', 'xlink:href']) {
-      const value = node.getAttribute(attr)
-      if (value && !value.startsWith('#') && !isLocalUrl(value)) {
-        node.removeAttribute(attr)
-        hit = true
+  if (node.namespaceURI === SVG_NS) {
+    // Whatever the element, an href is a fetch unless it points inside the
+    // svg; <a> only navigates.
+    if (tag !== 'a') {
+      for (const attr of ['href', 'xlink:href']) {
+        const value = node.getAttribute(attr)
+        if (value && badRef(value)) {
+          node.removeAttribute(attr)
+          hit = true
+        }
+      }
+    }
+    // filter, mask, fill, clip-path ... take a css url() as a presentation
+    // attribute.
+    for (const attr of node.getAttributeNames()) {
+      const value = node.getAttribute(attr)!
+      if (attr !== 'style' && value.includes('(')) {
+        const result = blockCssUrls(value, remote ? 'trackers' : 'all')
+        if (result.blocked) {
+          node.setAttribute(attr, result.css)
+          hit = true
+        }
       }
     }
   }
   const style = node.getAttribute('style')
   if (style) {
-    const result = blockCssUrls(style)
+    const result = blockCssUrls(style, remote ? 'trackers' : 'all')
     if (result.blocked) {
       node.setAttribute('style', result.css)
       hit = true
     }
   }
-  if (hit) current.blocked++
+  // A dropped tracker isn't a loss worth telling the reader about.
+  if (hit && !remote) current.blocked++
 })
 
 // Mail is untrusted HTML rendered into the popup. The extension's CSP already
@@ -118,6 +139,7 @@ export function sanitizeMail(html: string, opts: { remote?: boolean } = {}): { h
 
 // The <style> contents that prepareHtml pulled out of a mail, which no sanitize
 // pass saw.
-export function sanitizeStyles(css: string, opts: { remote?: boolean } = {}): string {
-  return opts.remote ? css : blockCssUrls(css).css
+export function sanitizeStyles(css: string, opts: { remote?: boolean } = {}): { css: string; blocked: number } {
+  if (opts.remote) return { css: blockCssUrls(css, 'trackers').css, blocked: 0 }
+  return blockCssUrls(css)
 }

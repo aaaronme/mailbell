@@ -54,6 +54,38 @@ describe('sanitizeMail', () => {
     expect(blocked).toBe(7)
   })
 
+  it('blocks remote urls hidden in svg attributes, and keeps local ones', () => {
+    const { html, blocked } = sanitizeMail(
+      '<svg><rect filter="url(https://a/f.svg#f)"/><rect mask="url(https://a/m.svg#m)"/>' +
+        '<rect fill="url(https://a/g.svg#g)"/><rect fill="url(#g)"/>' +
+        '<linearGradient href="https://a/g.svg#x"/><linearGradient xlink:href="https://a/g.svg#x"/>' +
+        '<linearGradient href="#local"/></svg>',
+    )
+    expect(outsideRemoteSrc(html)).not.toContain('https://a/')
+    expect(blocked).toBe(5)
+    expect(html).toContain('fill="url(#g)"')
+    expect(html).toContain('href="#local"')
+  })
+
+  it('drops a sender-supplied data-remote-src in both modes', () => {
+    for (const remote of [false, true]) {
+      const { html } = sanitizeMail('<img data-remote-src="https://a/receipt" src="data:image/png;base64,AAAA">', { remote })
+      expect(html).not.toContain('https://a/receipt')
+    }
+  })
+
+  it('with remote, still drops urls on tracker hosts', () => {
+    const t = `https://x.${TRACKER_HOSTS[0]}/t.png`
+    const { html, blocked } = sanitizeMail(
+      `<img srcset="${t} 1x" src="https://a/ok.png" width=5><td background="${t}">x</td>` +
+        `<div style="background:url(${t}), url(https://a/ok.png)">y</div><video poster="${t}"></video>`,
+      { remote: true },
+    )
+    expect(html).not.toContain(TRACKER_HOSTS[0])
+    expect(html).toContain('https://a/ok.png')
+    expect(blocked).toBe(0)
+  })
+
   it('keeps cid and data images', () => {
     const { html, blocked } = sanitizeMail('<img src="cid:logo"><img src="data:image/png;base64,AAAA">')
     expect(html).toContain('src="cid:logo"')
@@ -94,12 +126,16 @@ describe('sanitizeStyles', () => {
   it('blocks @import and url() in font-face', () => {
     const css =
       '@import url("https://a/x.css"); @import "https://a/y.css"; @font-face{font-family:f;src:url(https://a/f.woff)} p{color:red}'
-    const out = sanitizeStyles(css)
+    const { css: out, blocked } = sanitizeStyles(css)
     expect(out).not.toContain('https://')
     expect(out).toContain('color:red')
+    expect(blocked).toBe(3)
   })
 
   it('leaves css alone with remote', () => {
-    expect(sanitizeStyles('p{background:url(https://a/b.png)}', { remote: true })).toContain('https://a/b.png')
+    expect(sanitizeStyles('p{background:url(https://a/b.png)}', { remote: true })).toEqual({
+      css: 'p{background:url(https://a/b.png)}',
+      blocked: 0,
+    })
   })
 })

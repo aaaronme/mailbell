@@ -168,7 +168,7 @@ ${DARK_MODE_RULES}  }
 
 const MailContent = memo((props: { contentHtml: string; styles: string[] }) => {
   const styleSheets = useMemo(() => {
-    return createStyleSheets([BASE_RESET_STYLE, ...props.styles.map((it) => sanitizeStyles(it)), DARK_MODE_FILTER_STYLE])
+    return createStyleSheets([BASE_RESET_STYLE, ...props.styles.map((it) => sanitizeStyles(it).css), DARK_MODE_FILTER_STYLE])
   }, [props.styles])
   const html = useMemo(() => sanitizeMail(props.contentHtml).html, [props.contentHtml])
   return (
