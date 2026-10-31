@@ -66,6 +66,40 @@ describe('senderIdentity', () => {
     expect(id.signedBy).toBe('evil.com')
   })
 
+  it('ignores a quoted local part that smuggles in segments', () => {
+    const id = senderIdentity(
+      [auth('mx.google.com; spf=pass smtp.mailfrom="x; dmarc=pass header.from=victim.com; dkim=pass header.d=victim.com "@evil.com')],
+      'ceo@victim.com',
+    )
+    expect(id.status).toBe('unverified')
+  })
+
+  it('does not let a quoted "(" hide or forge later segments', () => {
+    const id = senderIdentity(
+      [auth('mx.google.com; spf=pass smtp.mailfrom="(x"@evil.com; dmarc=fail header.from=victim.com; dkim=pass header.d=victim.com')],
+      'ceo@victim.com',
+    )
+    expect(id.status).toBe('failed')
+  })
+
+  it('fails safe on quoted or unterminated header.i values', () => {
+    const quoted = senderIdentity(
+      [auth('mx.google.com; dkim=pass header.i="@victim.com"; dmarc=pass header.from=victim.com')],
+      'ceo@victim.com',
+    )
+    expect(quoted.status).toBe('unverified')
+    const open = senderIdentity(
+      [auth('mx.google.com; dkim=pass header.d=evil.com; spf=pass smtp.mailfrom="x; dmarc=pass header.from=victim.com')],
+      'ceo@victim.com',
+    )
+    expect(open.status).toBe('unverified')
+  })
+
+  it('normalises signedBy', () => {
+    const id = senderIdentity([auth('mx.google.com; dkim=pass header.i=@Mail.A.com; dmarc=pass header.from=a.com')], 'x@a.com')
+    expect(id.signedBy).toBe('mail.a.com')
+  })
+
   it('handles nested comments and quoted strings', () => {
     const id = senderIdentity(
       [auth('mx.google.com; dkim=pass (a (b dmarc=pass) c) header.d=a.com; dmarc=fail (")") header.from=a.com')],
@@ -142,22 +176,28 @@ describe('senderIdentity', () => {
     expect(id.mailedBy).toBe('a.com')
   })
 
-  it('tls from Received headers', () => {
+  it('tls from the Received header added by mx.google.com', () => {
     expect(senderIdentity([], 'x@a.com').tls).toBeUndefined()
-    expect(senderIdentity([{ name: 'Received', value: 'by x with ESMTPS id 1' }], 'x@a.com').tls).toBe(true)
-    expect(senderIdentity([{ name: 'Received', value: 'by x with SMTP id 1' }], 'x@a.com').tls).toBe(false)
-    // Only the topmost hop, the one Gmail made, counts.
-    const hops = [
-      { name: 'Received', value: 'by mx.google.com with SMTP id 2' },
-      { name: 'Received', value: 'by x with ESMTPS id 1' },
+    expect(senderIdentity([{ name: 'Received', value: 'by x with ESMTPS id 1' }], 'x@a.com').tls).toBeUndefined()
+    const hops = (gmailHop: string) => [
+      { name: 'Received', value: 'by 2002:a05:6a20:1 with SMTP id abc; Sat, 31 Oct 2026 10:00:00 -0700 (PDT)' },
+      { name: 'Received', value: gmailHop },
+      { name: 'Received', value: 'from origin.example by relay.example with ESMTPS id 1' },
     ]
-    expect(senderIdentity(hops, 'x@a.com').tls).toBe(false)
+    const tls = 'from mail.x.com (mail.x.com. [1.2.3.4]) by mx.google.com with ESMTPS id q1 (version=TLS1_3)'
+    expect(senderIdentity(hops(tls), 'x@a.com').tls).toBe(true)
+    expect(senderIdentity(hops('from mail.x.com by MX.GOOGLE.COM with SMTP id q1'), 'x@a.com').tls).toBe(false)
   })
 
   it('replyToMismatch when registrable domains differ', () => {
     const id = senderIdentity([{ name: 'Reply-To', value: 'x@gmail.com' }], 'ceo@corp.com')
     expect(id.replyTo).toBe('x@gmail.com')
     expect(id.replyToMismatch).toBe(true)
+    for (const value of ['"<ceo@corp.com>" <x@evil.com>', 'x@evil.com (ceo@corp.com)', 'x@evil.com, y@corp.com']) {
+      const spoof = senderIdentity([{ name: 'Reply-To', value }], 'ceo@corp.com')
+      expect(spoof.replyToMismatch, value).toBe(true)
+      expect(spoof.replyTo, value).toBe('x@evil.com')
+    }
     const same = senderIdentity([{ name: 'Reply-To', value: 'Boss <x@mail.corp.com>' }], 'ceo@corp.com')
     expect(same.replyToMismatch).toBe(false)
   })

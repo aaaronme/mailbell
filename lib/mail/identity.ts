@@ -38,10 +38,13 @@ export function splitAddress(email: string): { local: string; host: string; doma
 const headerOf = (headers: Headers, name: string) =>
   headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value
 
-// Replaces RFC 5322 comments with a space. Comments are free text written by
-// whoever relayed the mail, so "(domain of dmarc=pass@evil.com ...)" must not
-// read as a result. Handles nesting, quoted-pairs and quoted strings.
-function stripComments(value: string): string {
+// Removes RFC 5322 comments and quoted strings in one left-to-right pass, so a
+// "(" inside quotes or a quote inside a comment can't desync it. Both are free
+// text a sender or relay controls ("(domain of dmarc=pass@evil.com ...)",
+// smtp.mailfrom="x; dmarc=pass"@evil.com), so neither may read as structure.
+// Nested comments and backslash escapes are honoured; an unterminated one
+// swallows the rest, which can only lose information.
+function stripQuotedAndComments(value: string): string {
   let out = ''
   let depth = 0
   let quoted = false
@@ -52,14 +55,11 @@ function stripComments(value: string): string {
       else if (c === '(') depth++
       else if (c === ')' && --depth === 0) out += ' '
     } else if (quoted) {
-      out += c
-      if (c === '\\') out += value[++i] ?? ''
+      if (c === '\\') i++
       else if (c === '"') quoted = false
-    } else if (c === '(') depth = 1
-    else {
-      if (c === '"') quoted = true
-      out += c
-    }
+    } else if (c === '"') quoted = true
+    else if (c === '(') depth = 1
+    else out += c
   }
   return out
 }
@@ -81,7 +81,7 @@ function property(segment: Segment, key: string): string | undefined {
 function authResult(headers: Headers) {
   const value = headerOf(headers, 'Authentication-Results')
   if (value === undefined) return undefined
-  const [authserv = '', ...rest] = stripComments(value).split(';')
+  const [authserv = '', ...rest] = stripQuotedAndComments(value).split(';')
   if (authserv.trim().split(/\s+/)[0]?.toLowerCase() !== 'mx.google.com') return undefined
   const segments: Segment[] = []
   for (const text of rest) {
@@ -100,17 +100,27 @@ function authResult(headers: Headers) {
   }
 }
 
-const emailIn = (address: string) => address.match(/<([^>]*)>/)?.[1]?.trim() ?? address.trim()
+// The addr-specs of an address header, in order. Display names and comments
+// are dropped first, so an address written inside one never counts.
+function addressList(value: string): string[] {
+  return stripQuotedAndComments(value)
+    .split(/,(?![^<]*>)/)
+    .map((part) => (part.match(/<([^>]*)>/)?.[1] ?? part).trim())
+    .filter(Boolean)
+}
 
 export function senderIdentity(headers: Headers, fromEmail: string): SenderIdentity {
   const fromDomain = splitAddress(fromEmail).domain
   const auth = authResult(headers)
 
-  const signedBy = auth?.dkim.find(Boolean)
+  const signedBy = auth?.dkim.find(Boolean)?.replace(/^.*@/, '').toLowerCase()
   const returnPath = headerOf(headers, 'Return-Path')?.replace(/[<>\s]/g, '')
-  const received = headerOf(headers, 'Received')
-  const replyTo = headerOf(headers, 'Reply-To')
-  const replyToEmail = replyTo && emailIn(replyTo)
+  // Gmail's own hop: Received headers above it are internal, those below it
+  // are the sender's to write.
+  const received = headers.find(
+    (h) => h.name.toLowerCase() === 'received' && /\bby\s+mx\.google\.com\b/i.test(h.value),
+  )?.value
+  const replyTos = addressList(headerOf(headers, 'Reply-To') ?? '')
 
   let status: AuthStatus
   let reason: string | undefined
@@ -143,7 +153,7 @@ export function senderIdentity(headers: Headers, fromEmail: string): SenderIdent
     mailedBy: returnPath ? registrableDomain(returnPath) : undefined,
     via: signer && signer !== fromDomain ? signer : undefined,
     tls: received === undefined ? undefined : /ESMTPS|version=TLS/i.test(received),
-    replyTo,
-    replyToMismatch: !!replyToEmail && registrableDomain(replyToEmail) !== fromDomain,
+    replyTo: replyTos[0],
+    replyToMismatch: replyTos.some((a) => registrableDomain(a) !== fromDomain),
   }
 }
