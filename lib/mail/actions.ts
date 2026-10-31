@@ -137,66 +137,126 @@ const patchLabels = (labelIds: string[], { add, remove }: { add: string[]; remov
 
 const LIST = ['mail', 'list'] as const
 
-type Snapshot = [readonly unknown[], unknown][]
+// What patchCache changed, per list key, for the action's own rows only, so
+// rollback and undo never touch rows another action has since changed.
+interface RowRecord {
+  row: ThreadRow
+  removed?: { page: number; index: number }
+}
+export interface Patch {
+  lists: [readonly unknown[], RowRecord[]][]
+  threads: [readonly unknown[], unknown][]
+}
 
-function patchCache(a: MailAction, targets: ActionTarget[]): Snapshot {
-  const ids = new Set(targets.map((it) => `${it.account}\n${it.threadId}`))
+const idOf = (it: { account: string; threadId: string }) => `${it.account}\n${it.threadId}`
+
+function patchCache(a: MailAction, targets: ActionTarget[]): Patch {
+  const ids = new Set(targets.map(idOf))
   const ops = cacheOps(a)
-  const snapshot: Snapshot = [
-    ...queryClient.getQueriesData({ queryKey: LIST }),
-    ...targets.flatMap((it) => queryClient.getQueriesData({ queryKey: mailKeys.thread(it.account, it.threadId) })),
-  ]
+  const patch: Patch = {
+    lists: [],
+    threads: targets.flatMap((it) => queryClient.getQueriesData({ queryKey: mailKeys.thread(it.account, it.threadId) })),
+  }
   for (const [key, data] of queryClient.getQueriesData<ListData>({ queryKey: LIST })) {
     if (!data) continue
     const remove = removesFromFolder(a, String(key[3]))
-    queryClient.setQueryData<ListData>(key, {
-      ...data,
-      pages: data.pages.map((page) => ({
-        ...page,
-        rows: remove
-          ? page.rows.filter((r) => !ids.has(`${r.account}\n${r.threadId}`))
-          : page.rows.map((r) =>
-              ids.has(`${r.account}\n${r.threadId}`) ? { ...r, labelIds: patchLabels(r.labelIds, ops) } : r,
-            ),
-      })),
-    })
+    const records: RowRecord[] = []
+    const pages = data.pages.map((page, p) => ({
+      ...page,
+      rows: page.rows.flatMap((r, index) => {
+        if (!ids.has(idOf(r))) return [r]
+        records.push(remove ? { row: r, removed: { page: p, index } } : { row: r })
+        return remove ? [] : [{ ...r, labelIds: patchLabels(r.labelIds, ops) }]
+      }),
+    }))
+    if (!records.length) continue
+    patch.lists.push([key, records])
+    queryClient.setQueryData<ListData>(key, { ...data, pages })
   }
   for (const it of targets) {
     queryClient.setQueryData<{ labelIds: string[] }>(mailKeys.thread(it.account, it.threadId), (open) =>
       open ? { ...open, labelIds: patchLabels(open.labelIds, ops) } : open,
     )
   }
-  return snapshot
+  return patch
 }
 
-async function callApi(a: MailAction, account: string, ids: string[]) {
+// Puts the recorded rows back as they were, leaving every other row alone.
+function restorePatch(patch: Patch) {
+  for (const [key, records] of patch.lists) {
+    const data = queryClient.getQueryData<ListData>(key)
+    if (!data) continue
+    const pages = data.pages.map((page) => ({ ...page, rows: [...page.rows] }))
+    const present = new Set(pages.flatMap((page) => page.rows.map(idOf)))
+    for (const { row, removed } of records) {
+      if (!removed) {
+        for (const page of pages) {
+          page.rows = page.rows.map((r) => (idOf(r) === idOf(row) ? { ...r, labelIds: row.labelIds } : r))
+        }
+      } else if (!present.has(idOf(row)) && pages.length) {
+        const page = pages[Math.min(removed.page, pages.length - 1)]!
+        page.rows.splice(Math.min(removed.index, page.rows.length), 0, row)
+      }
+    }
+    queryClient.setQueryData<ListData>(key, { ...data, pages })
+  }
+  for (const [key, data] of patch.threads) queryClient.setQueryData(key, data)
+}
+
+async function callApi(a: MailAction, targets: ActionTarget[]) {
   const ops = labelOps(a)
-  if (ops === 'trash') return trashThreads(account, ids)
-  if (ops === 'untrash') return untrashThreads(account, ids)
-  return modifyThreads(account, ids, ops.add, ops.remove)
+  await Promise.all(
+    [...Map.groupBy(targets, (it) => it.account)].map(([account, group]) => {
+      const ids = group.map((it) => it.threadId)
+      if (ops === 'trash') return trashThreads(account, ids)
+      if (ops === 'untrash') return untrashThreads(account, ids)
+      return modifyThreads(account, ids, ops.add, ops.remove)
+    }),
+  )
+}
+
+// Some threads may already have changed server-side, so refetch the truth.
+function invalidateFor(targets: ActionTarget[]) {
+  void queryClient.invalidateQueries({ queryKey: LIST })
+  for (const it of targets) {
+    void queryClient.invalidateQueries({ queryKey: mailKeys.thread(it.account, it.threadId) })
+  }
+}
+
+const poll = () => bgMessager.sendMessage('poll').catch(() => {})
+
+// Like applyAction, but returns what it changed in the cache so undo can put
+// those rows back.
+export async function applyWithPatch(a: MailAction, targets: ActionTarget[]): Promise<Patch> {
+  const patch = patchCache(a, targets)
+  try {
+    await callApi(a, targets)
+  } catch (err) {
+    restorePatch(patch)
+    invalidateFor(targets)
+    throw err
+  }
+  void poll()
+  return patch
 }
 
 export async function applyAction(a: MailAction, targets: ActionTarget[]): Promise<void> {
-  const byAccount = Map.groupBy(targets, (it) => it.account)
-  const snapshot = patchCache(a, targets)
+  await applyWithPatch(a, targets)
+}
+
+// Reverses a successful action. Rows come back immediately; if the inverse
+// call fails the action's effect is put back so the cache matches the server.
+export async function revertAction(a: MailAction, targets: ActionTarget[], patch: Patch): Promise<void> {
+  restorePatch(patch)
   try {
-    await Promise.all(
-      [...byAccount].map(([account, group]) =>
-        callApi(
-          a,
-          account,
-          group.map((it) => it.threadId),
-        ),
-      ),
-    )
+    await callApi(inverse(a), targets)
   } catch (err) {
-    for (const [key, data] of snapshot) queryClient.setQueryData(key, data)
-    // Some threads may already have changed server-side, so refetch the truth.
-    void queryClient.invalidateQueries({ queryKey: LIST })
-    for (const it of targets) {
-      void queryClient.invalidateQueries({ queryKey: mailKeys.thread(it.account, it.threadId) })
-    }
+    patchCache(a, targets)
+    invalidateFor(targets)
     throw err
   }
-  bgMessager.sendMessage('poll').catch(() => {})
+  // inverse(archive) re-adds INBOX even where it was never set, so lists are
+  // refetched rather than trusted.
+  invalidateFor(targets)
+  void poll()
 }

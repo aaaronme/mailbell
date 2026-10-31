@@ -35,6 +35,7 @@ describe('actions', () => {
   afterEach(() => {
     setTokenSource(getAccessToken)
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   it('maps actions to label operations', () => {
@@ -131,5 +132,64 @@ describe('actions', () => {
     await mod.applyAction({ kind: 'trash' }, [target('A'), target('B', 'other@gmail.com')])
     const urls = fetchMock.mock.calls.map((c) => String(c[0]))
     expect(urls.filter((u) => u.includes('/trash'))).toHaveLength(2)
+  })
+
+  it('sends a poll on success and swallows a rejected poll', async () => {
+    const { bgMessager } = await import('@/lib/messager')
+    const send = vi.mocked(bgMessager.sendMessage)
+    send.mockClear()
+    send.mockRejectedValueOnce(new Error('no background'))
+    await expect(mod.applyAction({ kind: 'star' }, [target('A')])).resolves.toBeUndefined()
+    expect(send).toHaveBeenCalledWith('poll')
+  })
+
+  it('invalidates the affected thread keys on failure', async () => {
+    fetchMock.mockResolvedValue(new Response('no', { status: 500 }))
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries')
+    await expect(mod.applyAction({ kind: 'archive' }, [target('A')])).rejects.toThrow()
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: mailKeys.thread('me@gmail.com', 'A') })
+  })
+
+  it("rollback leaves another action's optimistic change alone", async () => {
+    seed([row('A'), row('B')])
+    const releases: ((r: Response) => void)[] = []
+    fetchMock.mockImplementation(() => new Promise<Response>((res) => releases.push(res)))
+    const archive = mod.applyAction({ kind: 'archive' }, [target('A')])
+    await vi.waitFor(() => expect(releases).toHaveLength(1))
+    const star = mod.applyAction({ kind: 'star' }, [target('B')])
+    await vi.waitFor(() => expect(releases).toHaveLength(2))
+    releases[0]!(new Response('no', { status: 500 }))
+    await expect(archive).rejects.toThrow()
+    const data = queryClient.getQueryData<{ pages: { rows: ThreadRow[] }[] }>(listKey())!
+    expect(data.pages[0]!.rows.map((r) => [r.threadId, r.labelIds.includes('STARRED')])).toEqual([
+      ['A', false],
+      ['B', true],
+    ])
+    releases[1]!(Response.json({}))
+    await star
+  })
+
+  it('patches the all-accounts key and a user-label folder', async () => {
+    const allKey = mailKeys.all(undefined, undefined, undefined)
+    const labelKey = mailKeys.list('me@gmail.com', 'Label_1', { labelIds: ['Label_1'], includeSpamTrash: false })
+    seed([row('A'), row('B')], allKey)
+    seed([row('A'), row('B')], labelKey)
+    await mod.applyAction({ kind: 'archive' }, [target('A')])
+    expect(cachedIds(allKey)).toEqual(['B'])
+    expect(cachedIds(labelKey)).toEqual(['B'])
+  })
+
+  it('removes from and restores into the right page', async () => {
+    queryClient.setQueryData(listKey(), {
+      pages: [{ rows: [row('A'), row('B')] }, { rows: [row('C'), row('D'), row('E')] }],
+      pageParams: [undefined, 't'],
+    })
+    const pages = () => queryClient.getQueryData<{ pages: { rows: ThreadRow[] }[] }>(listKey())!.pages
+    fetchMock.mockResolvedValue(new Response('no', { status: 500 }))
+    await expect(mod.applyAction({ kind: 'archive' }, [target('D')])).rejects.toThrow()
+    expect(pages().map((p) => p.rows.map((r) => r.threadId))).toEqual([
+      ['A', 'B'],
+      ['C', 'D', 'E'],
+    ])
   })
 })
