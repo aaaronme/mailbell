@@ -1,5 +1,7 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
+import { useMemo } from 'react'
 import { gmailFetch, header, mapLimit, parseAddressField, parseMailbox, type GmailPart } from '../api/gmail'
+import { registrableDomain } from './identity'
 
 const KEY = 'correspondents'
 const BOOTSTRAPPED_KEY = 'correspondentsBootstrapped'
@@ -84,4 +86,11 @@ export const correspondentsOptions = (account: string) =>
 
 export function useCorrespondents(account: string) {
   return useQuery(correspondentsOptions(account))
+}
+
+// The domains the account has written to, for lookalike checks; undefined
+// until they load. Memoised on the set, not rebuilt per message.
+export function useKnownDomains(account: string): Set<string> | undefined {
+  const { data } = useCorrespondents(account)
+  return useMemo(() => data && new Set([...data].map((it) => registrableDomain(it))), [data])
 }

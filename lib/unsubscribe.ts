@@ -11,6 +11,12 @@ export type UnsubscribePlan =
   | { kind: 'open'; url: string }
   | { kind: 'mail'; to: string; subject: string }
 
+export const UNSUBSCRIBED: Record<UnsubscribePlan['kind'], string> = {
+  post: 'Unsubscribe request sent',
+  open: 'Unsubscribe page opened',
+  mail: 'Unsubscribe mail ready to send',
+}
+
 const UNSUBSCRIBE_TEXT =
   /unsub|abmelden|abbestellen|d[ée]sabonner|d[ée]sinscri|darse de baja|cancelar (la )?suscripci[oó]n|uitschrijven|disiscriv|opt[- ]out|退订|取消订阅|配信停止/i
 

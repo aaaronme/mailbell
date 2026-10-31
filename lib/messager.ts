@@ -11,7 +11,8 @@ export const bgMessager = defineExtensionMessaging<{
   // popup to background
   gmailAction(data: GmailAction): void
   // popup to background: thread url -> how it was done, null if no option
-  unsubscribe(url: string): UnsubscribePlan['kind'] | null
+  // html: the newest body, for senders whose only link is in the footer.
+  unsubscribe(data: { url: string; html: string }): UnsubscribePlan['kind'] | null
   // popup to background: interactive Google sign-in, optionally for a known
   // address (reconnect) -> the signed-in address
   addAccount(loginHint?: string): string

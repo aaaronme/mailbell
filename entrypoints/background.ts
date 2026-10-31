@@ -218,8 +218,7 @@ async function start() {
     }
     await stateManager.refresh()
   })
-  bgMessager.onMessage('unsubscribe', async ({ data: url }) => {
-    const html = stateManager.threads.find((t) => t.url === url)?.messages.at(-1)?.contentHtml ?? ''
+  bgMessager.onMessage('unsubscribe', async ({ data: { url, html } }) => {
     // The body link still works without headers, so a failed fetch only
     // costs the better options.
     const raw = await getRawMessage(url).catch(async (err) => {

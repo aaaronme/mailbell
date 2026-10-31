@@ -5,7 +5,7 @@ import type { OpenThread } from '@/lib/api/mailbox'
 import type { EmailThread } from '@/lib/StateManager'
 import dayjs from 'dayjs'
 import { PaperclipIcon, ChevronsUpDownIcon, ReplyIcon, ReplyAllIcon, CalendarIcon, VideoIcon } from 'lucide-react'
-import { Fragment, memo, useEffect, useImperativeHandle, useMemo, useState } from 'react'
+import { Fragment, memo, useEffect, useImperativeHandle, useState } from 'react'
 import root from 'react-shadow'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCollapseState } from '@/lib/useCollapseState'
@@ -17,8 +17,7 @@ import { bgMessager } from '@/lib/messager'
 import { replyRecipients } from '@/lib/reply'
 import { addToCalendarUrl, findMeetingLink, formatEventTime } from '@/lib/calendar'
 import { useShortcuts } from '@/lib/useShortcuts'
-import { addCorrespondents, normaliseEmails, useCorrespondents } from '@/lib/mail/correspondents'
-import { registrableDomain } from '@/lib/mail/identity'
+import { addCorrespondents, normaliseEmails, useCorrespondents, useKnownDomains } from '@/lib/mail/correspondents'
 import { suspicionOf, type SuspicionReason } from '@/lib/mail/suspicion'
 import { SenderHeader } from './SenderHeader'
 import { ProtectedContent } from './ProtectedContent'
@@ -267,6 +266,8 @@ function ReplyBox({
 
 export { DARK_MODE_RULES } from './ProtectedContent'
 
+const NO_DOMAINS = new Set<string>()
+
 export function ThreadView(props: {
   thread: Thread
   // The reader is acting on the mail: pointer, wheel, scroll or focus inside.
@@ -284,11 +285,7 @@ export function ThreadView(props: {
   const correspondents = useCorrespondents(thread.account)
   const mine = thread.account.toLowerCase()
 
-  // Memoised on the set, not rebuilt per message.
-  const knownDomains = useMemo(
-    () => new Set([...(correspondents.data ?? [])].map((it) => registrableDomain(it))),
-    [correspondents.data],
-  )
+  const knownDomains = useKnownDomains(thread.account) ?? NO_DOMAINS
 
   const known = correspondents.data
   useEffect(() => {

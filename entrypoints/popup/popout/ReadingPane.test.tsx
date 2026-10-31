@@ -16,6 +16,8 @@ vi.mock('@/lib/mail/undo', () => ({
 const { createAppRouter } = await import('../router')
 const { setTokenSource, threadUrl } = await import('@/lib/api/gmail')
 const { runUndoable, runSilent } = await import('@/lib/mail/undo')
+const { bgMessager } = await import('@/lib/messager')
+const { toast } = await import('sonner')
 
 const A = 'a@example.com'
 const B = 'b@example.com'
@@ -23,6 +25,8 @@ let threadLabels = ['INBOX', 'UNREAD']
 let labels: object[] = []
 // Thread id -> how many messages it has; one otherwise.
 let sizes: Record<string, number> = {}
+// Thread id -> the HTML body of its messages; none otherwise.
+let bodies: Record<string, string> = {}
 
 const json = (body: object) => new Response(JSON.stringify(body))
 
@@ -44,7 +48,10 @@ function stubFetch() {
             labelIds: threadLabels,
             snippet: 's',
             internalDate: String(Date.now() - (10 - n) * 60_000),
-            payload: { headers: [{ name: 'From', value: 'Bob <bob@example.org>' }, { name: 'Subject', value: id }] },
+            payload: {
+              headers: [{ name: 'From', value: 'Bob <bob@example.org>' }, { name: 'Subject', value: id }],
+              ...(bodies[id] && { mimeType: 'text/html', body: { data: btoa(bodies[id]) } }),
+            },
           })),
         })
       }
@@ -89,6 +96,7 @@ describe('ReadingPane', () => {
     setTokenSource(async (account) => account)
     threadLabels = ['INBOX', 'UNREAD']
     sizes = {}
+    bodies = {}
     labels = [
       { id: 'INBOX', name: 'INBOX', type: 'system' },
       { id: 'Label_1', name: 'Work', type: 'user' },
@@ -116,6 +124,33 @@ describe('ReadingPane', () => {
       await expect.element(page.getByTitle('Mark unread (Shift+U)')).toBeInTheDocument()
       expect(pane().querySelector('[title^="Archive"]')).toBeNull()
     }
+  })
+
+  it('unsubscribes from a newsletter, sending its body for the footer link', async () => {
+    const html = '<p>News</p><a href="https://example.org/u">Unsubscribe</a>'
+    bodies = { t1: html }
+    const send = vi.spyOn(bgMessager, 'sendMessage').mockResolvedValue('open' as never)
+    const success = vi.spyOn(toast, 'success').mockReturnValue('')
+    const { screen } = await mount(at('INBOX', 't1'))
+    await screen.getByTitle('Unsubscribe').click()
+    expect(send).toHaveBeenCalledWith('unsubscribe', { url: threadUrl(A, 't1'), html })
+    await vi.waitFor(() => expect(success).toHaveBeenCalledWith('Unsubscribe page opened'))
+  })
+
+  // Answering spam tells its sender the address is read.
+  it('offers no Unsubscribe in Spam', async () => {
+    bodies = { t1: '<a href="https://example.org/u">Unsubscribe</a>' }
+    threadLabels = ['SPAM']
+    await mount(at('SPAM', 't1'))
+    await expect.element(page.getByTitle('Not spam')).toBeInTheDocument()
+    expect(pane().querySelector('[title="Unsubscribe"]')).toBeNull()
+  })
+
+  it('offers no Unsubscribe without an unsubscribe link', async () => {
+    bodies = { t1: '<p>Hi</p>' }
+    await mount(at('INBOX', 't1'))
+    await expect.element(page.getByTitle('Mark unread (Shift+U)')).toBeInTheDocument()
+    expect(pane().querySelector('[title="Unsubscribe"]')).toBeNull()
   })
 
   it('shows Not spam in place of Spam in Spam', async () => {

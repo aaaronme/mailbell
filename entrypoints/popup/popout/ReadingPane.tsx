@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { openMailInWeb, parseThreadUrl } from '@/lib/api/gmail'
 import { useLabels, useOpenThread } from '@/lib/mail/queries'
+import { UnsubscribeButton } from './UnsubscribeButton'
 import type { MailActions } from './useMailActions'
 
 export type LabelMenu = 'label' | 'move' | null
@@ -132,6 +133,7 @@ export function ReadingPane({
               ))}
           </DropdownMenuContent>
         </DropdownMenu>
+        {open.data && <UnsubscribeButton thread={open.data} />}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" title="More" aria-label="More">

@@ -9,7 +9,7 @@ import {
 import { openMailInWeb } from '@/lib/api/gmail'
 import { bgMessager, type GmailAction } from '@/lib/messager'
 import type { EmailThread } from '@/lib/StateManager'
-import { hasUnsubscribeLink } from '@/lib/unsubscribe'
+import { hasUnsubscribeLink, UNSUBSCRIBED } from '@/lib/unsubscribe'
 import { mailQueryKey } from '@/lib/useMailQuery'
 import { useQueryClient } from '@tanstack/react-query'
 import { useShortcuts } from '@/lib/useShortcuts'
@@ -55,7 +55,7 @@ export function MailActions({
   async function unsubscribe(cleanup: GmailAction) {
     let kind
     try {
-      kind = await bgMessager.sendMessage('unsubscribe', thread.url)
+      kind = await bgMessager.sendMessage('unsubscribe', { url: thread.url, html: thread.messages.at(-1)?.contentHtml ?? '' })
     } catch (err) {
       console.error(err)
       toast.error('Unsubscribe failed')
@@ -65,15 +65,7 @@ export function MailActions({
       toast.error('No unsubscribe option found')
       return
     }
-    await run(
-      {
-        post: 'Unsubscribe request sent',
-        open: 'Unsubscribe page opened',
-        mail: 'Unsubscribe mail ready to send',
-      }[kind],
-      "Couldn't remove the mail",
-      cleanup,
-    )
+    await run(UNSUBSCRIBED[kind], "Couldn't remove the mail", cleanup)
   }
   const one = (cmd: 'archive' | 'deleteMail' | 'markAsRead' | 'markAsSpam') => ({ cmd, url: thread.url })
   useShortcuts(
