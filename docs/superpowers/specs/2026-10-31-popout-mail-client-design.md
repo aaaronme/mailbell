@@ -62,7 +62,8 @@ In the owner's words: "basically just copy Mimestream but as a browser extension
 - Marking read after about 2 seconds, or at once when going into the mail.
 - Shortcuts work from the list; messages are preloaded.
 - Remote content blocked, tracking pixels never loaded, suspicious mail shown safely first.
-- Sender identity and verified status shown properly.
+- Sender identity and verified status shown properly, with the real domain emphasised, a "Replies go to" warning and a first-time-sender note, and no TLD badges.
+- Export and import of settings, without tokens.
 - Full scope from the start.
 - A notification click opens the popout on that mail.
 
@@ -123,6 +124,10 @@ In the owner's words: "basically just copy Mimestream but as a browser extension
   - **Unverified:** no DMARC policy, or checks that pass without alignment. No mark, and the details say why.
   - **Failed:** SPF, DKIM or DMARC fails. This is a warning, and the mail counts as suspicious (below).
   - **"via":** "via sendgrid.net", like Gmail shows, when the signing domain differs from the From domain.
+- **The real domain, emphasised:** the address shows its registrable domain in stronger text (`springfield.gov` in `notices@mail.springfield.gov`), so a domain like `springfield.gov.x7.ru` reads as `x7.ru`. This uses the Public Suffix List, bundled with the build and never fetched; the library is the builder's choice.
+- **Check-mark wording:** the tooltip says what was verified, "Sent from springfield.gov (verified)", never "Trusted" or "Safe". A hacked `.gov` or `.edu` mailbox passes these checks, so the check mark vouches for the domain, not for the content. No TLD badges are shown *(owner agreed; badges would make a hacked `.gov` look more official)*.
+- **"Replies go to" warning:** when the Reply-To's registrable domain differs from From's, the header shows "Replies go to x@gmail.com" prominently. The inline and window composers repeat it above the To field before sending. This is the usual sign of a hijacked mailbox. On its own it doesn't make a mail suspicious, because newsletters and helpdesks do it legitimately.
+- **First-time sender:** "You haven't written to this address before" shows in the header when the user has never sent mail to the sender. This is checked locally against the account's sent addresses, the same store autocomplete uses, filled from Sent and the People API "other contacts". When it shows together with a "Replies go to" mismatch, the two combine into one warning.
 - **No logos are loaded:** avatars stay as initials *(my call)*. Fetching BIMI logos or favicons would tell outside servers that the mail was opened, which works against the privacy rules below. If the account has Contacts permission, a contact's own photo from the People API may be shown, since that goes only to Google.
 - **Lookalike warning:** a display name that looks like another address, or a From domain that is one edit away from a domain the user has corresponded with (e.g. `paypa1.com`), counts as suspicious *(my call; the second check uses only local data)*.
 
@@ -198,6 +203,23 @@ This applies to every place Mailbell shows a mail body: the popout and the toolb
 - **Signatures:** shown per alias. Editing them needs `gmail.settings.basic` (`sendAs.update`), so they can be edited here too.
 - **Other settings:** the existing popup Settings (notifications, sounds, accounts, OAuth client) are reachable from the popout's sidebar, along with the new options: marking read, remote images, trusted senders and undo-send delay.
 
+### Export and import
+*(owner: yes)*
+- **Settings → Export settings** saves one JSON file. **Import** reads it, shows what it will replace, and applies it on confirmation.
+- **Included:**
+  - the OAuth client (ID and secret);
+  - all settings, including per-account ones;
+  - custom notification sounds, base64-encoded;
+  - trusted senders, the muted-thread list (if Mailbell keeps its own), the remembered recipient addresses, and the list of account addresses.
+- **Not included:**
+  - sign-in tokens, deliberately. After an import, each listed account shows "Sign in again" with one click, and the address is pre-filled as the login hint.
+  - caches and the debug log.
+- **The file:**
+  - the export dialog says it contains the client secret and should be kept private;
+  - it carries a format version, so a newer Mailbell can import an older file;
+  - import validates the file and refuses unknown versions with a clear message.
+- **Not done:** automatic syncing through browser sync, because of its small size limits and because it can't hold sound files *(owner agreed)*.
+
 ### Small extras
 - **Mute a thread:** it skips the inbox when new replies arrive. The Gmail API can't apply Gmail's own mute *(builder to confirm whether a `MUTED` label is writable)*. If it isn't, Mailbell keeps its own muted-thread list in local storage and archives new replies to those threads when the background polls.
 - **Print a thread:** the browser's print dialog on a clean, print-styled view.
@@ -219,7 +241,7 @@ Four parts, built in this order but **released together** *(my call)*. Earlier p
    - incremental scope requests and the optional People host permission;
    - contacts autocomplete and contact photos;
    - the setup guide, `SETUP.md` and README updates for the new scopes and the People API.
-4. **Management and settings:** label management, block sender, filters, the vacation responder, signature editing, mute, print, show original, important markers, the conversation-view toggle, and the popout's settings pages.
+4. **Management and settings:** export and import, label management, block sender, filters, the vacation responder, signature editing, mute, print, show original, important markers, the conversation-view toggle, and the popout's settings pages.
 
 ## Not possible with the Gmail API
 
