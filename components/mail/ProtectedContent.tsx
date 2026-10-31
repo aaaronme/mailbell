@@ -1,6 +1,7 @@
 import { memo, useMemo, useState } from 'react'
 import root from 'react-shadow'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { createStyleSheets } from '@/lib/addStyle'
 import { sanitizeMail, sanitizeStyles } from '@/lib/sanitizeMail'
@@ -229,8 +230,13 @@ export function ProtectedContent(props: {
             size="sm"
             variant="ghost"
             onClick={async () => {
-              await trustSender(account, email)
-              await queryClient.invalidateQueries({ queryKey: trustedKey })
+              try {
+                await trustSender(account, email)
+                await queryClient.invalidateQueries({ queryKey: trustedKey })
+              } catch (err) {
+                console.error(err)
+                toast.error(`Could not save: ${err instanceof Error ? err.message : String(err)}`)
+              }
             }}
           >
             Always show from this sender

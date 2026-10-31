@@ -5,7 +5,7 @@ import type { OpenThread } from '@/lib/api/mailbox'
 import type { EmailThread } from '@/lib/StateManager'
 import dayjs from 'dayjs'
 import { PaperclipIcon, ChevronsUpDownIcon, ReplyIcon, ReplyAllIcon, CalendarIcon, VideoIcon } from 'lucide-react'
-import { memo, useEffect, useMemo, useState } from 'react'
+import { Fragment, memo, useEffect, useMemo, useState } from 'react'
 import root from 'react-shadow'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCollapseState } from '@/lib/useCollapseState'
@@ -266,14 +266,18 @@ export function ThreadView(props: {
     [correspondents.data],
   )
 
+  const known = correspondents.data
   useEffect(() => {
-    const own = thread.messages.filter((it) => it.senderEmail.toLowerCase() === mine)
-    if (own.length === 0) return
-    const recipients = own.flatMap((it) => [...it.to, ...it.cc].map((to) => parseMailbox(to).email))
+    if (!known) return
+    const recipients = thread.messages
+      .filter((it) => it.senderEmail.toLowerCase() === mine)
+      .flatMap((it) => [...it.to, ...it.cc].map((to) => parseMailbox(to).email.toLowerCase()))
+    // Writing only what is new keeps a refetch of the same thread from writing.
+    if (!recipients.some((it) => !known.has(it))) return
     void addCorrespondents(thread.account, recipients).then(() =>
       queryClient.invalidateQueries({ queryKey: ['correspondents', thread.account] }),
     )
-  }, [thread.messages, thread.account, mine, queryClient])
+  }, [thread.messages, thread.account, mine, known, queryClient])
 
   const groupStartIndex = collapseStore.groupIndexes.size > 0 ? Math.min(...collapseStore.groupIndexes) : null
 
@@ -285,6 +289,8 @@ export function ThreadView(props: {
       onScrollCapture={onEngage}
       onFocus={onEngage}
     >
+      {/* Keyed by thread so a reused view starts every mail's local state afresh. */}
+      <Fragment key={thread.url}>
       <MeetingBar thread={thread} />
       <div className="flex-1">
         <div>
@@ -329,6 +335,7 @@ export function ThreadView(props: {
         </div>
         <ReplyBox thread={thread} />
       </div>
+      </Fragment>
     </div>
   )
 }

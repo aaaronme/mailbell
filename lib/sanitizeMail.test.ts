@@ -132,6 +132,12 @@ describe('sanitizeStyles', () => {
     expect(blocked).toBe(3)
   })
 
+  it('drops every @import, also when remote content is allowed', () => {
+    const css = '@import "https://cdn.example.com/y.css"; p{color:red}'
+    expect(sanitizeStyles(css, { remote: true }).css).not.toContain('@import')
+    expect(sanitizeStyles(css, { remote: true }).css).toContain('color:red')
+  })
+
   it('resumes after a malformed unquoted url', () => {
     const css = 'a{background:url(data:x" ); background:url(https://a/x.png) ; ")}'
     expect(sanitizeStyles(css)).toMatchObject({ blocked: 2 })

@@ -57,12 +57,14 @@ const VERIFIED = (domain: string) => ({
   'Authentication-Results': `mx.google.com; dkim=pass header.d=${domain}; spf=pass smtp.mailfrom=${domain}; dmarc=pass header.from=${domain}`,
 })
 
-function renderView(t: EmailThread) {
-  return render(
-    <QueryClientProvider client={new QueryClient()}>
-      <ThreadView thread={t} />
-    </QueryClientProvider>,
-  )
+const wrap = (t: EmailThread, client: QueryClient, onEngage?: () => void) => (
+  <QueryClientProvider client={client}>
+    <ThreadView thread={t} onEngage={onEngage} />
+  </QueryClientProvider>
+)
+
+function renderView(t: EmailThread, onEngage?: () => void) {
+  return render(wrap(t, new QueryClient(), onEngage))
 }
 
 const shadowOf = (container: Element) => [...container.querySelectorAll('*')].find((it) => it.shadowRoot)?.shadowRoot
@@ -131,5 +133,97 @@ describe('ThreadView', () => {
   it('flags a first-time sender', async () => {
     const view = await renderView(thread({}))
     await expect.element(view.getByText("You haven't written to this address before")).toBeVisible()
+  })
+
+  it('resets per-mail state when the same view is given another thread', async () => {
+    const client = new QueryClient()
+    const html = '<img src="https://cdn.example.com/a.png" width="200">'
+    const a = thread({ html })
+    const view = await render(wrap(a, client))
+    await view.getByRole('button', { name: 'Show images' }).click()
+    await expect.element(view.getByText('Images are hidden to protect your privacy')).not.toBeInTheDocument()
+    await view.rerender(wrap({ ...thread({ html }), url: 'https://mail.google.com/mail/?authuser=me%40gmail.com#inbox/t2' }, client))
+    await expect.element(view.getByText('Images are hidden to protect your privacy')).toBeVisible()
+  })
+
+  it('resets Show formatted when the same view is given another thread', async () => {
+    const client = new QueryClient()
+    const make = () => thread({ labels: ['SPAM'], html: '<p>Hi</p>' })
+    const view = await render(wrap(make(), client))
+    await view.getByRole('button', { name: 'Show formatted' }).click()
+    await expect.element(view.getByRole('button', { name: 'Show formatted' })).not.toBeInTheDocument()
+    await view.rerender(wrap({ ...make(), url: 'https://mail.google.com/mail/?authuser=me%40gmail.com#inbox/t2' }, client))
+    await expect.element(view.getByRole('button', { name: 'Show formatted' })).toBeVisible()
+  })
+
+  it('does not write correspondents again for an equal messages array', async () => {
+    const client = new QueryClient()
+    const make = () => thread({ from: `Me <${ACCOUNT}>`, to: 'Bob <bob@example.com>' })
+    const view = await render(wrap(make(), client))
+    await vi.waitFor(async () => expect((await getCorrespondents(ACCOUNT)).has('bob@example.com')).toBe(true))
+    await vi.waitFor(() => expect(client.getQueryData(['correspondents', ACCOUNT])).toBeDefined())
+    const set = vi.spyOn(fakeBrowser.storage.local, 'set')
+    await view.rerender(wrap(make(), client))
+    await new Promise((r) => setTimeout(r, 100))
+    expect(set).not.toHaveBeenCalled()
+  })
+
+  it('calls onEngage for pointer, wheel, scroll and focus inside the view', async () => {
+    const onEngage = vi.fn()
+    const view = await renderView(thread({ html: '<p>Hi</p>' }), onEngage)
+    const root = view.container.firstElementChild!
+    const inner = root.querySelector('button')!
+    inner.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    expect(onEngage).toHaveBeenCalledTimes(1)
+    inner.dispatchEvent(new WheelEvent('wheel', { bubbles: true }))
+    expect(onEngage).toHaveBeenCalledTimes(2)
+    inner.dispatchEvent(new Event('scroll'))
+    expect(onEngage).toHaveBeenCalledTimes(3)
+    inner.focus()
+    expect(onEngage.mock.calls.length).toBeGreaterThanOrEqual(4)
+  })
+
+  it('merges the reply-to and first-time warnings into one line', async () => {
+    const view = await renderView(thread({ headers: { 'Reply-To': 'x@gmail.com' } }))
+    await expect
+      .element(view.getByText("Replies go to x@gmail.com, and you haven't written to this address before"))
+      .toBeVisible()
+  })
+
+  it('lists mailed-by, signed-by and security under Details', async () => {
+    const view = await renderView(
+      thread({
+        from: 'Gov <notices@springfield.gov>',
+        headers: {
+          ...VERIFIED('springfield.gov'),
+          'Return-Path': '<bounce@mailer.example.org>',
+          Received: 'from a by mx.google.com with ESMTPS id 1; Fri, 30 Oct 2026 08:00:00 +0000',
+        },
+      }),
+    )
+    const details = view.getByRole('button', { name: 'Details' })
+    await expect.element(details).toHaveAttribute('aria-expanded', 'false')
+    await details.click()
+    await expect.element(details).toHaveAttribute('aria-expanded', 'true')
+    await expect.element(view.getByText('Mailed by')).toBeVisible()
+    await expect.element(view.getByText('example.org')).toBeVisible()
+    await expect.element(view.getByText('Signed by')).toBeVisible()
+    await expect.element(view.getByText('Security')).toBeVisible()
+    await expect.element(view.getByText('TLS', { exact: true })).toBeVisible()
+  })
+
+  it('shows images for a trusted sender without the bar', async () => {
+    await fakeBrowser.storage.local.set({ trustedSenders: { [ACCOUNT]: ['ann@example.com'] } })
+    const view = await renderView(thread({ html: '<img src="https://cdn.example.com/a.png" width="200">' }))
+    await vi.waitFor(() =>
+      expect(shadowOf(view.container)?.querySelector('img')?.getAttribute('src')).toBe('https://cdn.example.com/a.png'),
+    )
+    await expect.element(view.getByText('Images are hidden to protect your privacy')).not.toBeInTheDocument()
+  })
+
+  it('never shows the suspicious view for mail the account sent', async () => {
+    const view = await renderView(thread({ from: `Me <${ACCOUNT}>`, labels: ['SPAM', 'SENT'], html: '<p>Hi</p>' }))
+    await expect.element(view.getByText('Hi')).toBeVisible()
+    await expect.element(view.getByRole('button', { name: 'Show formatted' })).not.toBeInTheDocument()
   })
 })

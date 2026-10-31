@@ -25,8 +25,13 @@ export function SenderHeader(props: { message: Message; account: string; firstTi
   const { identity } = message
   const [details, setDetails] = useState(false)
   const replyTo = identity.replyToMismatch && identity.replyTo ? `Replies go to ${identity.replyTo}` : null
-  const first = "you haven't written to this address before"
-  const warning = replyTo ? (firstTime ? `${replyTo}, and ${first}` : replyTo) : firstTime ? `You${first.slice(3)}` : null
+  const warning = replyTo
+    ? firstTime
+      ? `${replyTo}, and you haven't written to this address before`
+      : replyTo
+    : firstTime
+      ? "You haven't written to this address before"
+      : null
   const security = identity.tls === undefined ? null : identity.tls ? 'TLS' : 'No TLS'
 
   return (
@@ -34,9 +39,9 @@ export function SenderHeader(props: { message: Message; account: string; firstTi
       <Avatar name={message.senderName} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <div className="min-w-0 flex-1 truncate">
-            <span className="font-medium">{message.senderName}</span>
-            <span className="ml-1.5">
+          <div className="flex min-w-0 flex-1 items-baseline">
+            <span className="shrink-0 font-medium">{message.senderName}</span>
+            <span className="ml-1.5 min-w-0 truncate">
               <Address email={message.senderEmail} />
             </span>
             {identity.status === 'verified' && (
@@ -60,7 +65,8 @@ export function SenderHeader(props: { message: Message; account: string; firstTi
           {message.cc.length > 0 && <div>Cc: {message.cc.join(', ')}</div>}
         </div>
         {warning && <div className="text-xs font-medium">{warning}</div>}
-        <Button size="sm" variant="ghost" className="-ml-3 h-6 text-xs" onClick={() => setDetails(!details)}>
+        <Button size="sm" variant="ghost" className="-ml-3 h-6 text-xs" aria-expanded={details}
+          onClick={() => setDetails(!details)}>
           Details
         </Button>
         {details && (

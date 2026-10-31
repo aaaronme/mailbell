@@ -166,8 +166,9 @@ export function blockCssUrls(css: string, mode: 'all' | 'trackers' = 'all'): { c
           else j += css[j] === '\\' ? 2 : 1
         }
         const rule = css.slice(i, Math.min(j + 1, css.length))
+        // Dropped in both modes: an imported sheet is never fetched, and a
+        // constructed sheet rejects @import outright.
         if (mode === 'all' || hasTrackerUrl(rule)) blocked++
-        else out += rule
         i += rule.length
       } else {
         out += css.slice(i, end)
