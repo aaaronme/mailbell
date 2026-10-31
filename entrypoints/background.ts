@@ -100,7 +100,7 @@ async function start() {
   browser.notifications.onClicked.addListener(async (id) => {
     if (!id.startsWith(NOTIFICATION_PREFIX)) return
     await browser.notifications.clear(id)
-    await openPopoutOn(id.slice(NOTIFICATION_PREFIX.length))
+    await openPopoutOn(id.slice(NOTIFICATION_PREFIX.length)).catch((err) => debugLog('opening the popout failed', err))
   })
   const stateManager = new StateManager({
     checkLoginStatus,

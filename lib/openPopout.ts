@@ -3,7 +3,9 @@ import { popupMessager } from './messager'
 
 // The hash is built by hand rather than with the router's serializer: lib is
 // imported by the background, and the serializer only ships behind the React
-// entry. The router parses it back the same way for any value.
+// entry. The router's parser
+// JSON-reads values, so a numeric account comes back a number; validateMailSearch
+// turns it back into a string.
 export function popoutUrl(threadUrl: string): string {
   const account = parseThreadUrl(threadUrl)?.account ?? 'all'
   const search = new URLSearchParams({ account, folder: 'INBOX', thread: threadUrl })

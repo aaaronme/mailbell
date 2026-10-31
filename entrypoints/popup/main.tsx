@@ -21,7 +21,8 @@ setTokenSource(fetchTokenFromBackground)
 
 // A notification click lands here when a popout is already open: show that mail
 // and bring the tab forward. Focus is best effort - the navigation is what counts.
-if (isPopoutTab) {
+// The Settings sound-picker tab (?page=) is a popout tab too, but not a mail one.
+if (isPopoutTab && !new URLSearchParams(location.search).has('page')) {
   popupMessager.onMessage('openThread', async ({ data: thread }) => {
     const account = parseThreadUrl(thread)?.account
     await router.navigate({ to: '/mail', search: validateMailSearch({ account, thread }) })
