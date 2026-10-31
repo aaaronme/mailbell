@@ -1,6 +1,6 @@
 import { defineExtensionMessaging } from '@webext-core/messaging'
 import type { UnsubscribePlan } from './unsubscribe'
-import type { OAuthClient } from './auth/oauth'
+import { OAuthError, type OAuthClient } from './auth/oauth'
 import type { Recipients } from './reply'
 
 export const bgMessager = defineExtensionMessaging<{
@@ -21,6 +21,8 @@ export const bgMessager = defineExtensionMessaging<{
   setOAuthClient(client: OAuthClient | null): void
   // popup to background: a plain-text reply into the thread at url
   sendReply(data: { url: string; recipients: Recipients; text: string }): void
+  // page to background: a valid access token; only the background refreshes
+  getAccessToken(data: { account: string; force?: boolean }): string
 }>()
 
 export type GmailAction =
@@ -36,3 +38,23 @@ export type GmailAction =
 export const popupMessager = defineExtensionMessaging<{
   refreshPopup(): void
 }>()
+
+// Messaging rethrows a handler's error as a plain Error with the same message,
+// so the background tags OAuthErrors and the page rebuilds them.
+const OAUTH_ERROR_TAG = 'OAuthError|'
+
+export function tagOAuthError(err: unknown): unknown {
+  return err instanceof OAuthError ? new Error(`${OAUTH_ERROR_TAG}${err.code}|${err.message}`) : err
+}
+
+export async function fetchTokenFromBackground(account: string, force?: boolean): Promise<string> {
+  try {
+    return await bgMessager.sendMessage('getAccessToken', { account, force })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : ''
+    if (!message.startsWith(OAUTH_ERROR_TAG)) throw err
+    const [code = '', ...rest] = message.slice(OAUTH_ERROR_TAG.length).split('|')
+    const full = rest.join('|')
+    throw new OAuthError(code, full === code ? undefined : full.slice(code.length + 2))
+  }
+}

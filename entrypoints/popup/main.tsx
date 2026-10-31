@@ -4,6 +4,8 @@ import '@fontsource-variable/geist'
 import '@fontsource-variable/source-serif-4'
 import './style.css'
 import { debugLog } from '@/lib/debugLog'
+import { fetchTokenFromBackground } from '@/lib/messager'
+import { setTokenSource } from '@/lib/api/gmail'
 import { isPopoutTab } from './view'
 
 // The toolbar popup sizes itself to its content, so a long unbroken subject
@@ -12,6 +14,8 @@ import { isPopoutTab } from './view'
 if (!isPopoutTab) {
   document.documentElement.classList.add('fixed-width-popup')
 }
+
+setTokenSource(fetchTokenFromBackground)
 
 const root = ReactDOM.createRoot(document.getElementById('root')!)
 root.render(<App />)

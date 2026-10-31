@@ -127,7 +127,17 @@ class GmailApiError extends Error {
   }
 }
 
-async function gmailFetch<T>(account: string, path: string, init: RequestInit = {}): Promise<T> {
+export type TokenSource = (account: string, force?: boolean) => Promise<string>
+
+let tokenSource: TokenSource = getAccessToken
+
+// Extension pages must not refresh tokens themselves (only the background
+// does), so they swap in a source that asks the background.
+export function setTokenSource(source: TokenSource): void {
+  tokenSource = source
+}
+
+export async function gmailFetch<T>(account: string, path: string, init: RequestInit = {}): Promise<T> {
   const send = async (token: string) =>
     fetch(`${API}${path}`, {
       ...init,
@@ -137,13 +147,13 @@ async function gmailFetch<T>(account: string, path: string, init: RequestInit = 
         ...init.headers,
       },
     })
-  const token = await getAccessToken(account)
+  const token = await tokenSource(account)
   let resp = await send(token)
   // The token can be revoked or expire early. A parallel request may already
   // have refreshed it; only force a refresh if the stored one is unchanged.
   if (resp.status === 401) {
-    const stored = await getAccessToken(account)
-    resp = await send(stored !== token ? stored : await getAccessToken(account, true))
+    const stored = await tokenSource(account)
+    resp = await send(stored !== token ? stored : await tokenSource(account, true))
   }
   if (!resp.ok) {
     const text = await resp.text().catch(() => '')
@@ -154,7 +164,7 @@ async function gmailFetch<T>(account: string, path: string, init: RequestInit = 
 
 // Runs fn over items with at most `limit` in flight; Gmail's per-user quota
 // trips on a burst of 50 parallel thread fetches.
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length)
   let next = 0
   async function worker() {
@@ -201,7 +211,7 @@ export interface GmailThread {
 
 // --- MIME -> ThreadMail ------------------------------------------------------
 
-function header(part: GmailPart, name: string): string | undefined {
+export function header(part: GmailPart, name: string): string | undefined {
   const lower = name.toLowerCase()
   return part.headers?.find((h) => h.name.toLowerCase() === lower)?.value
 }

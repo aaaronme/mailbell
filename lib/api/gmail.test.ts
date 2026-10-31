@@ -6,6 +6,8 @@ import {
   decodeBase64Url,
   getAllRSS,
   getRawMessage,
+  gmailFetch,
+  setTokenSource,
   sendReply,
   getThreadMail,
   markAsSpam,
@@ -20,6 +22,8 @@ import {
   type GmailPart,
   type GmailThread,
 } from './gmail'
+import { OAuthError } from '../auth/oauth'
+import { fetchTokenFromBackground, bgMessager } from '../messager'
 
 vi.stubGlobal('browser', fakeBrowser)
 
@@ -311,5 +315,43 @@ describe('Gmail API calls', () => {
     expect(mime).toContain('To: bob@example.com\r\n')
     expect(mime).toContain('Subject: Re: Plans\r\n')
     expect(mime).toContain('In-Reply-To: <m1@example.com>\r\nReferences: <m1@example.com>\r\n')
+  })
+})
+
+describe('token source', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('uses the injected token source', async () => {
+    setTokenSource(async () => 'T1')
+    const fetchMock = vi.fn(async () => new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    await gmailFetch('a@x', '/labels')
+    expect((fetchMock.mock.calls[0] as any)[1].headers.Authorization).toBe('Bearer T1')
+  })
+
+  it('on 401 asks the source again, forcing only if unchanged', async () => {
+    const tokens = ['T1', 'T1', 'T2']
+    const source = vi.fn(async (_a: string, _f?: boolean) => tokens.shift()!)
+    setTokenSource(source)
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response('', { status: 401 }))
+      .mockResolvedValueOnce(new Response('{}'))
+    vi.stubGlobal('fetch', fetchMock)
+    await gmailFetch('a@x', '/labels')
+    expect(source.mock.calls).toEqual([['a@x'], ['a@x'], ['a@x', true]])
+    expect(fetchMock.mock.calls[1]![1].headers.Authorization).toBe('Bearer T2')
+  })
+
+  it('token failure surfaces as OAuthError to the page', async () => {
+    const send = vi.spyOn(bgMessager, 'sendMessage').mockRejectedValue(new Error('OAuthError|invalid_grant|invalid_grant: revoked'))
+    setTokenSource(fetchTokenFromBackground)
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const err = (await gmailFetch('a@x', '/labels').catch((e: unknown) => e)) as OAuthError
+    expect(err).toBeInstanceOf(OAuthError)
+    expect(err.code).toBe('invalid_grant')
+    expect(err.message).toBe('invalid_grant: revoked')
+    expect(fetchMock).not.toHaveBeenCalled()
+    send.mockRestore()
   })
 })

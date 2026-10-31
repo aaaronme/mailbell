@@ -1,4 +1,4 @@
-import { bgMessager, popupMessager } from '@/lib/messager'
+import { bgMessager, popupMessager, tagOAuthError } from '@/lib/messager'
 import {
   archiveMail,
   checkLoginStatus,
@@ -16,7 +16,7 @@ import {
   openMailInWeb,
   parseThreadUrl,
 } from '@/lib/api/gmail'
-import { getAccounts, getCustomClient, removeAccount, setCustomClient, signIn } from '@/lib/auth/oauth'
+import { getAccessToken, getAccounts, getCustomClient, removeAccount, setCustomClient, signIn } from '@/lib/auth/oauth'
 import type { PublicPath } from 'wxt/browser'
 import { StateManager, type EmailThread } from '@/lib/StateManager'
 import { getThreadCode } from '@/lib/otp'
@@ -242,6 +242,13 @@ async function start() {
   })
   // In the background, not the popup: a send must finish even if the popup
   // closes meanwhile.
+  bgMessager.onMessage('getAccessToken', async ({ data }) => {
+    try {
+      return await getAccessToken(data.account, data.force)
+    } catch (err) {
+      throw tagOAuthError(err)
+    }
+  })
   bgMessager.onMessage('sendReply', async ({ data }) => {
     await sendReply(data.url, data.recipients, data.text).catch(async (err) => {
       await debugLog('sendReply: failed ->', String(err))
