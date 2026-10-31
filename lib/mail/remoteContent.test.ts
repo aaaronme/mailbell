@@ -77,6 +77,26 @@ describe('blockCssUrls', () => {
     }
   })
 
+  it('scans a long run of whitespace in linear time', () => {
+    for (const tail of ['x)', 'x']) {
+      const css = `a{background:url(a${' '.repeat(200000)}${tail}}`
+      const start = performance.now()
+      const result = blockCssUrls(css)
+      expect(performance.now() - start).toBeLessThan(200)
+      expect(result.blocked).toBe(1)
+    }
+  })
+
+  it('reads only css whitespace as whitespace', () => {
+    const css = 'a{background:url(data:x\u00a0y\ufeff)}'
+    expect(blockCssUrls(css)).toEqual({ css, blocked: 0 })
+  })
+
+  it('drops a malformed url on a tracker host when remote is allowed', () => {
+    const css = `a{background:url(https://x.${TRACKER_HOSTS[0]}/ x)}`
+    expect(blockCssUrls(css, 'trackers')).toEqual({ css: 'a{background:url("")}', blocked: 1 })
+  })
+
   it('keeps a local url padded with whitespace', () => {
     const css = 'a{background:url( data:image/png;base64,AAA )}'
     expect(blockCssUrls(css)).toEqual({ css, blocked: 0 })

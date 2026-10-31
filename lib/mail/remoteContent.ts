@@ -79,6 +79,8 @@ export function isLocalUrl(url: string): boolean {
   return /^(data|cid):/i.test(url.replace(/[\t\n\r]/g, '').trim())
 }
 
+// CSS whitespace; NBSP, U+FEFF and the like are ordinary characters in a url.
+const CSS_SPACE = /[ \t\n\r\f]/
 const IDENT_START = /[a-z_\-\\]|[^\x00-\x7f]/i
 const IDENT_CHAR = /[a-z0-9_\-]|[^\x00-\x7f]/i
 
@@ -180,6 +182,7 @@ export function blockCssUrls(css: string, mode: 'all' | 'trackers' = 'all'): { c
         let j = end + 1
         while (/\s/.test(css[j] ?? '')) j++
         let value: string
+        let malformed = false
         if (css[j] === '"' || css[j] === "'") {
           const string = readString(css, j)
           value = string.value
@@ -194,18 +197,23 @@ export function blockCssUrls(css: string, mode: 'all' | 'trackers' = 'all'): { c
           // still ends there and parses on from, so it can't hide a
           // declaration behind a string or a nested paren.
           let k = j
-          let malformed = false
           while (k < css.length && css[k] !== ')') {
             const c = css.charAt(k)
             if (c === '"' || c === "'" || c === '(') malformed = true
-            else if (/\s/.test(c) && !/^\s*\)/.test(css.slice(k, css.indexOf(')', k) + 1 || undefined))) malformed = true
+            else if (!malformed && CSS_SPACE.test(c)) {
+              // Trailing space is fine; anywhere else it is malformed. Jump the
+              // run so the scan stays linear.
+              while (CSS_SPACE.test(css.charAt(k + 1))) k++
+              if (css.charAt(k + 1) !== ')') malformed = true
+            }
             k += c === '\\' ? 2 : 1
           }
           k = Math.min(k, css.length)
-          value = malformed ? 'malformed:' : decodeCssEscapes(css.slice(j, k))
+          value = decodeCssEscapes(css.slice(j, k))
           j = Math.min(k + 1, css.length)
         }
-        if (!bad(value)) out += css.slice(i, j)
+        // A malformed token is never plainly local, however it starts.
+        if (!bad(value) && !(malformed && mode === 'all')) out += css.slice(i, j)
         else {
           out += 'url("")'
           blocked++
