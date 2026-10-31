@@ -436,7 +436,7 @@ export function threadToMail(thread: GmailThread, inlineData: Map<string, string
 // aren't downloaded at all).
 const MAX_INLINE_IMAGE_BYTES = 1_000_000
 
-async function fetchInlineData(account: string, thread: GmailThread): Promise<Map<string, string>> {
+export async function fetchInlineData(account: string, thread: GmailThread): Promise<Map<string, string>> {
   const data = new Map<string, string>()
   for (const msg of visibleMessages(thread)) {
     for (const image of inlineImagesOf(msg)) {
