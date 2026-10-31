@@ -103,6 +103,19 @@ describe('ThreadView', () => {
     await vi.waitFor(() => expect(shadowOf(view.container)?.querySelector('a')?.textContent).toBe('Login'))
   })
 
+  it('a safe-text link opens a menu to copy or open its full url', async () => {
+    const href = 'https://evil.ru/c/long-tracking-path'
+    const view = await renderView(thread({ labels: ['SPAM'], html: `<p><a href="${href}">Login</a></p>` }))
+    const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    const openTab = vi.spyOn(fakeBrowser.tabs, 'create').mockResolvedValue({} as never)
+    await view.getByTitle(href).click()
+    await view.getByRole('menuitem', { name: 'Copy link' }).click()
+    expect(copy).toHaveBeenCalledWith(href)
+    await view.getByTitle(href).click({ button: 'right' })
+    await view.getByRole('menuitem', { name: 'Open link' }).click()
+    expect(openTab).toHaveBeenCalledWith({ url: href })
+  })
+
   it('remote images bar', async () => {
     const view = await renderView(thread({ html: '<p>Hi</p><img src="https://cdn.example.com/a.png" width="200">' }))
     await expect.element(view.getByText('Images are hidden to protect your privacy')).toBeVisible()

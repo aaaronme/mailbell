@@ -10,6 +10,7 @@ import type { Message } from '@/lib/api/gmail'
 import { useCorrespondents } from '@/lib/mail/correspondents'
 import { getTrustedSenders, shouldShowRemote, trustSender } from '@/lib/mail/remoteContent'
 import { safeParts } from '@/lib/mail/safeText'
+import { SafeLink } from './SafeLink'
 import { REASON_TEXT, type SuspicionReason } from '@/lib/mail/suspicion'
 
 // react-shadow's `root` is proxied via an index signature, which under
@@ -204,15 +205,8 @@ export function ProtectedContent(props: {
       <div className="flex flex-col gap-2">
         <div className="text-xs font-medium">{suspicion.map((it) => REASON_TEXT[it]).join('. ')}</div>
         <pre className="whitespace-pre-wrap wrap-anywhere font-sans">
-          {/* Not clickable: the full url is there to read, on hover. */}
           {safeParts(message.contentHtml).map((it, i) =>
-            typeof it === 'string' ? (
-              it
-            ) : (
-              <span key={i} title={it.href} className="underline decoration-foreground/40 decoration-dotted">
-                {it.text}
-              </span>
-            ),
+            typeof it === 'string' ? it : <SafeLink key={i} text={it.text} href={it.href} />,
           )}
         </pre>
         <div>
