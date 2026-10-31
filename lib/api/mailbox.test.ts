@@ -72,6 +72,10 @@ describe('mailbox api', () => {
 })
 
 describe('decodeEntities', () => {
+  it('leaves names inherited from Object.prototype alone', () => {
+    expect(decodeEntities('&constructor; &toString; &__proto__;')).toBe('&constructor; &toString; &__proto__;')
+  })
+
   it('decodes numeric and named entities', () => {
     expect(decodeEntities('It&#39;s &amp; &#x41; &lt;b&gt; &quot;q&quot; &apos;x&apos;&nbsp;y &#8211;')).toBe(
       'It\'s & A <b> "q" \'x\'\u00a0y \u2013',

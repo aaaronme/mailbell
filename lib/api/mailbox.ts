@@ -34,14 +34,15 @@ export async function listLabels(account: string): Promise<GmailLabel[]> {
   )
 }
 
-const NAMED_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' }
+// A Map, so a sender's "&constructor;" can't reach Object.prototype.
+const NAMED_ENTITIES = new Map(Object.entries({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' }))
 
 // Gmail's snippet is HTML-escaped text. Decoded in one pass, so "&amp;lt;"
 // stays "&lt;"; never through the DOM.
 export function decodeEntities(text: string): string {
   return text.replace(/&(?:#(\d+)|#x([\da-f]+)|([a-z]+));/gi, (whole, dec, hex, name) => {
     const code = dec ? Number(dec) : hex ? parseInt(hex, 16) : undefined
-    if (code === undefined) return NAMED_ENTITIES[String(name).toLowerCase()] ?? whole
+    if (code === undefined) return NAMED_ENTITIES.get(String(name).toLowerCase()) ?? whole
     return code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff) ? String.fromCodePoint(code) : whole
   })
 }
