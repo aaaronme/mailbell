@@ -41,10 +41,12 @@ export const popupMessager = defineExtensionMessaging<{
 
 // Messaging rethrows a handler's error as a plain Error with the same message,
 // so the background tags OAuthErrors and the page rebuilds them.
-const OAUTH_ERROR_TAG = 'OAuthError|'
+const OAUTH_ERROR_TAG = 'OAuthError:'
 
 export function tagOAuthError(err: unknown): unknown {
-  return err instanceof OAuthError ? new Error(`${OAUTH_ERROR_TAG}${err.code}|${err.message}`) : err
+  return err instanceof OAuthError
+    ? new Error(OAUTH_ERROR_TAG + JSON.stringify([err.code, err.description]))
+    : err
 }
 
 export async function fetchTokenFromBackground(account: string, force?: boolean): Promise<string> {
@@ -53,8 +55,7 @@ export async function fetchTokenFromBackground(account: string, force?: boolean)
   } catch (err) {
     const message = err instanceof Error ? err.message : ''
     if (!message.startsWith(OAUTH_ERROR_TAG)) throw err
-    const [code = '', ...rest] = message.slice(OAUTH_ERROR_TAG.length).split('|')
-    const full = rest.join('|')
-    throw new OAuthError(code, full === code ? undefined : full.slice(code.length + 2))
+    const [code, description] = JSON.parse(message.slice(OAUTH_ERROR_TAG.length)) as [string, string | undefined]
+    throw new OAuthError(code, description ?? undefined)
   }
 }

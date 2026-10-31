@@ -22,8 +22,8 @@ import {
   type GmailPart,
   type GmailThread,
 } from './gmail'
-import { OAuthError } from '../auth/oauth'
-import { fetchTokenFromBackground, bgMessager } from '../messager'
+import { getAccessToken, OAuthError } from '../auth/oauth'
+import { fetchTokenFromBackground, bgMessager, tagOAuthError } from '../messager'
 
 vi.stubGlobal('browser', fakeBrowser)
 
@@ -319,7 +319,10 @@ describe('Gmail API calls', () => {
 })
 
 describe('token source', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setTokenSource(getAccessToken)
+  })
 
   it('uses the injected token source', async () => {
     setTokenSource(async () => 'T1')
@@ -342,16 +345,51 @@ describe('token source', () => {
     expect(fetchMock.mock.calls[1]![1].headers.Authorization).toBe('Bearer T2')
   })
 
-  it('token failure surfaces as OAuthError to the page', async () => {
-    const send = vi.spyOn(bgMessager, 'sendMessage').mockRejectedValue(new Error('OAuthError|invalid_grant|invalid_grant: revoked'))
-    setTokenSource(fetchTokenFromBackground)
-    const fetchMock = vi.fn()
-    vi.stubGlobal('fetch', fetchMock)
-    const err = (await gmailFetch('a@x', '/labels').catch((e: unknown) => e)) as OAuthError
-    expect(err).toBeInstanceOf(OAuthError)
-    expect(err.code).toBe('invalid_grant')
-    expect(err.message).toBe('invalid_grant: revoked')
-    expect(fetchMock).not.toHaveBeenCalled()
-    send.mockRestore()
+  describe('OAuthError round trip through the background message', () => {
+    const roundTrip = async (thrown: unknown) => {
+      const send = vi.spyOn(bgMessager, 'sendMessage').mockRejectedValue(
+        // messaging rethrows only the message
+        new Error((tagOAuthError(thrown) as Error).message),
+      )
+      try {
+        return (await fetchTokenFromBackground('a@x').catch((e: unknown) => e)) as OAuthError
+      } finally {
+        send.mockRestore()
+      }
+    }
+
+    it.each([
+      ['code and description', new OAuthError('invalid_grant', 'revoked')],
+      ['code only', new OAuthError('no_client')],
+      ['description containing pipes and colons', new OAuthError('profile_403', 'a|b: c|')],
+    ])('rebuilds %s', async (_name, original) => {
+      const err = await roundTrip(original)
+      expect(err).toBeInstanceOf(OAuthError)
+      expect(err.code).toBe(original.code)
+      expect(err.description).toBe(original.description)
+      expect(err.message).toBe(original.message)
+    })
+
+    it('passes other errors through untouched', async () => {
+      const other = new Error('boom')
+      expect(tagOAuthError(other)).toBe(other)
+      const err = await roundTrip(other)
+      expect(err).not.toBeInstanceOf(OAuthError)
+      expect(err.message).toBe('boom')
+    })
+
+    it('surfaces from gmailFetch without calling fetch', async () => {
+      const send = vi.spyOn(bgMessager, 'sendMessage').mockRejectedValue(
+        new Error((tagOAuthError(new OAuthError('invalid_grant', 'revoked')) as Error).message),
+      )
+      setTokenSource(fetchTokenFromBackground)
+      const fetchMock = vi.fn()
+      vi.stubGlobal('fetch', fetchMock)
+      const err = (await gmailFetch('a@x', '/labels').catch((e: unknown) => e)) as OAuthError
+      expect(err).toBeInstanceOf(OAuthError)
+      expect(err.code).toBe('invalid_grant')
+      expect(fetchMock).not.toHaveBeenCalled()
+      send.mockRestore()
+    })
   })
 })

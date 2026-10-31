@@ -240,8 +240,6 @@ async function start() {
     }
     return plan.kind
   })
-  // In the background, not the popup: a send must finish even if the popup
-  // closes meanwhile.
   bgMessager.onMessage('getAccessToken', async ({ data }) => {
     try {
       return await getAccessToken(data.account, data.force)
@@ -249,6 +247,8 @@ async function start() {
       throw tagOAuthError(err)
     }
   })
+  // In the background, not the popup: a send must finish even if the popup
+  // closes meanwhile.
   bgMessager.onMessage('sendReply', async ({ data }) => {
     await sendReply(data.url, data.recipients, data.text).catch(async (err) => {
       await debugLog('sendReply: failed ->', String(err))

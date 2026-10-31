@@ -150,9 +150,9 @@ interface TokenResponse {
 export class OAuthError extends Error {
   constructor(
     readonly code: string,
-    message?: string,
+    readonly description?: string,
   ) {
-    super(message ? `${code}: ${message}` : code)
+    super(description ? `${code}: ${description}` : code)
   }
 }
 
