@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook } from 'vitest-browser-react'
 import { getAccessToken, OAuthError } from '../auth/oauth'
 import { setTokenSource } from '../api/gmail'
+import { debugLog } from '../debugLog'
 import { FAST_POLL_MS } from '../fastPoll'
 import type { HistoryRecord, ThreadRow } from '../api/mailbox'
 
@@ -347,6 +348,7 @@ describe('live updates', () => {
 
     beforeEach(() => {
       vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+      vi.mocked(debugLog).mockClear()
       fetchMock.mockImplementation(async () => Response.json({ historyId: '100' }))
     })
     afterEach(() => vi.useRealTimers())
@@ -388,7 +390,6 @@ describe('live updates', () => {
     it('stays silent for a signed-out account', async () => {
       const { toast } = await import('sonner')
       const error = vi.spyOn(toast, 'error')
-      const { debugLog } = await import('../debugLog')
       setTokenSource(async () => {
         throw new OAuthError('invalid_grant')
       })

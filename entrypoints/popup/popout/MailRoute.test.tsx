@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
 import { fakeBrowser } from '@webext-core/fake-browser'
@@ -11,6 +11,7 @@ vi.stubGlobal('chrome', fakeBrowser)
 
 const { createAppRouter } = await import('../router')
 const { setTokenSource } = await import('@/lib/api/gmail')
+const { getAccessToken } = await import('@/lib/auth/oauth')
 const { queryClient } = await import('@/lib/queryClient')
 const { notifyRefreshPopup } = await import('@/lib/mail/live')
 
@@ -139,6 +140,13 @@ describe('MailRoute', () => {
       ],
     })
 
+    let historyStatus = 200
+    let profileServed = 0
+    // While set, B's list rows and open thread wait for it.
+    let hold: Promise<void> | undefined
+    let release = () => {}
+    let held = 0
+
     beforeEach(async () => {
       await browser.storage.local.set({
         oauthAccounts: [{ email: A, refreshToken: 'r', accessToken: 't', expiresAt: 0 }],
@@ -147,43 +155,81 @@ describe('MailRoute', () => {
       queryClient.clear()
       snippetOfB = 'old snippet'
       profileId = '1'
+      historyStatus = 200
+      profileServed = 0
+      hold = undefined
+      held = 0
       fetchMock = vi.fn(async (input: string) => {
-          const path = new URL(input).pathname.replace(/^.*\/gmail\/v1\/users\/me/, '')
-          if (path === '/profile') return Response.json({ historyId: profileId })
-          if (path === '/history') {
-            const added = [{ message: { id: 'mB', threadId: 'B' }, labelIds: ['STARRED'] }]
-            return Response.json({ history: [{ labelsAdded: added }], historyId: profileId })
-          }
-          if (path === '/threads') return Response.json({ threads: [{ id: 'A' }, { id: 'B' }] })
-          if (path.startsWith('/threads/')) {
-            const id = path.slice('/threads/'.length)
-            return Response.json(threadBody(id, id === 'B' ? snippetOfB : 'snippet A'))
-          }
-          return Response.json({ labels: [] })
-        })
+        const url = new URL(input)
+        const path = url.pathname.replace(/^.*\/gmail\/v1\/users\/me/, '')
+        if (path === '/profile') {
+          profileServed++
+          return Response.json({ historyId: profileId })
+        }
+        if (path === '/history') {
+          if (historyStatus !== 200) return new Response('', { status: historyStatus })
+          const added = [{ message: { id: 'mB', threadId: 'B' }, labelIds: ['STARRED'] }]
+          return Response.json({ history: [{ labelsAdded: added }], historyId: profileId })
+        }
+        const wait = hold
+        if (path === '/threads') {
+          if (wait) held++
+          await wait
+          return Response.json({ threads: [{ id: 'A' }, { id: 'B' }] })
+        }
+        if (path.startsWith('/threads/')) {
+          const id = path.slice('/threads/'.length)
+          if (wait && id === 'B') held++
+          if (id === 'B') await wait
+          return Response.json(threadBody(id, id === 'B' ? snippetOfB : 'snippet A'))
+        }
+        return Response.json({ labels: [] })
+      })
       vi.stubGlobal('fetch', fetchMock)
     })
+    afterEach(() => {
+      release()
+      vi.unstubAllGlobals()
+      vi.stubGlobal('browser', fakeBrowser)
+      vi.stubGlobal('chrome', fakeBrowser)
+      setTokenSource(getAccessToken)
+      queryClient.clear()
+    })
 
-    it('keeps the selected thread selected and never shows the empty state', async () => {
+    const reading = () => document.querySelector('[data-testid="reading-pane"]')!.textContent ?? ''
+    const listText = () => document.querySelector('[data-testid="thread-list"]')!.textContent ?? ''
+
+    // B is open; a refresh brings a new snippet for it. Whatever the refresh
+    // does to the caches, B's content stays on screen until the new data lands.
+    async function refreshWithB() {
       const search = `account=${A}&folder=INBOX&thread=${encodeURIComponent(threadUrl(A, 'B'))}&cat=primary`
       await page.viewport(1200, 800)
       const { router } = await mount(`#/mail?${search}`, queryClient)
-      await vi.waitFor(() => expect(document.body.textContent).toContain('old snippet'))
+      await vi.waitFor(() => expect(listText()).toContain('old snippet'))
+      await vi.waitFor(() => expect(reading()).toContain('bob@example.org'))
       // The first check seeds the history id; only a later one finds changes.
-      await vi.waitFor(() => expect(fetchMock.mock.calls.some((c) => String(c[0]).includes('/profile'))).toBe(true))
-      const empty = vi.fn()
-      const watch = new MutationObserver(() => {
-        if (document.body.textContent?.includes('No conversation selected')) empty()
-      })
-      watch.observe(document.body, { childList: true, subtree: true, characterData: true })
+      await vi.waitFor(() => expect(profileServed).toBe(1))
+      await new Promise((r) => setTimeout(r, 0))
+      hold = new Promise<void>((resolve) => (release = resolve))
       snippetOfB = 'new snippet'
       profileId = '2'
       notifyRefreshPopup()
-      await vi.waitFor(() => expect(document.body.textContent).toContain('new snippet'))
-      watch.disconnect()
-      expect(empty).not.toHaveBeenCalled()
-      expect(document.body.textContent).not.toContain('old snippet')
+      await vi.waitFor(() => expect(held).toBeGreaterThan(0))
+      expect(listText()).toContain('old snippet')
+      expect(reading()).toContain('bob@example.org')
+      expect(reading()).not.toContain('No conversation selected')
+      release()
+      await vi.waitFor(() => expect(listText()).toContain('new snippet'))
+      expect(listText()).not.toContain('old snippet')
+      expect(reading()).toContain('bob@example.org')
       expect(router.state.location.search.thread).toBe(threadUrl(A, 'B'))
+    }
+
+    it('patches the open thread in place, keeping it on screen while its row is fetched', refreshWithB)
+
+    it('keeps the open thread on screen while an expired history reloads the lists', async () => {
+      historyStatus = 404
+      await refreshWithB()
     })
   })
 })

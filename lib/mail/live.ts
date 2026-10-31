@@ -223,7 +223,8 @@ export function createLiveChecker(accounts: () => string[]) {
 }
 
 // @webext-core/messaging allows one 'refreshPopup' listener per page, and
-// App.tsx owns it: the popout subscribes here instead.
+// App.tsx owns it: the popout subscribes here instead. One MailRoute is
+// mounted at a time, so a handler per mount is all this expects.
 const refreshHandlers = new Set<() => void>()
 export const onRefreshPopup = (handler: () => void) => {
   refreshHandlers.add(handler)
