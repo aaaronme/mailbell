@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAccessToken } from '../auth/oauth'
 import { setTokenSource, type GmailMessage } from './gmail'
-import { decodeEntities, listHistory, listThreadPage, modifyThreads } from './mailbox'
+import { decodeEntities, getThreadRowWithLabels, listHistory, listThreadPage, modifyThreads } from './mailbox'
 
 function msg(id: string, date: number, from: string, labels: string[], contentType: string): GmailMessage {
   return {
@@ -68,6 +68,22 @@ describe('mailbox api', () => {
     for (const [, init] of posts) {
       expect(JSON.parse(init.body)).toEqual({ addLabelIds: ['INBOX'], removeLabelIds: [] })
     }
+  })
+
+  it('a draft in progress does not bump the row date', async () => {
+    fetchMock.mockImplementation(async () =>
+      Response.json({
+        id: 't1',
+        historyId: '1',
+        messages: [
+          msg('m1', 1000, 'Ann <a@x.com>', ['INBOX'], 'text/plain'),
+          msg('m2', 5000, 'Me <me@gmail.com>', ['DRAFT'], 'text/plain'),
+        ],
+      }),
+    )
+    const { row, messageLabels } = await getThreadRowWithLabels('me@gmail.com', 't1')
+    expect(row.date).toBe(new Date(1000).toISOString())
+    expect(messageLabels).toEqual([['INBOX'], ['DRAFT']])
   })
 
   it('listHistory follows pages and asks for the four change types', async () => {

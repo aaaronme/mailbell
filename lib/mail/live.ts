@@ -3,18 +3,19 @@ import type { Query } from '@tanstack/react-query'
 import { mapLimit } from '../api/gmail'
 import {
   getProfile,
-  getThreadRow,
-  isNotFound,
+  getThreadRowWithLabels,
   listHistory,
+  isNotFound,
   type HistoryRecord,
   type ThreadRow,
 } from '../api/mailbox'
 import { OAuthError } from '../auth/oauth'
+import { debugLog } from '../debugLog'
 import { FAST_POLL_MS } from '../fastPoll'
 import { queryClient } from '../queryClient'
-import { idOf, LIST, patchLabels, patchRows, type LabelOps, type ListData } from './actions'
-import type { listQuery } from './folders'
-import type { AllInboxesPage } from './merge'
+import { idOf, LIST, patchRows, type ListData } from './actions'
+import { listQuery } from './folders'
+import { toAccountPages, type AllInboxesPage } from './merge'
 import { mailKeys } from './queries'
 
 // Past this, refetching is cheaper than replaying.
@@ -32,21 +33,19 @@ const isSearch = (key: readonly unknown[]) => !Array.isArray(queryOf(key)?.label
 const showsAccount = (key: readonly unknown[], account: string) =>
   isAllInboxes(key) ? ((key[5] as string[] | undefined)?.includes(account) ?? false) : key[2] === account
 
-// Whether a row with these labels still belongs in the folder's list.
-function inFolder(labelIds: string[], folder: string): boolean {
-  if (TRASH_SPAM.includes(folder)) return labelIds.includes(folder)
-  if (labelIds.some((it) => TRASH_SPAM.includes(it))) return false
-  return folder === 'ALL' || labelIds.includes(folder)
-}
-
-// Whether a row not yet in the list should join it: it has every label the
-// list asks for.
-function belongs(row: ThreadRow, query: ListQuery): boolean {
-  return (
-    query.labelIds.every((it) => row.labelIds.includes(it)) &&
-    (query.includeSpamTrash || !row.labelIds.some((it) => TRASH_SPAM.includes(it)))
+// Gmail lists a thread under a query when one of its messages matches it, so
+// membership is judged per message: one trashed reply doesn't take a thread
+// out of the Inbox.
+const belongs = (messageLabels: string[][], query: ListQuery) =>
+  messageLabels.some(
+    (labels) =>
+      query.labelIds.every((it) => labels.includes(it)) &&
+      (query.includeSpamTrash || !labels.some((it) => TRASH_SPAM.includes(it))),
   )
-}
+
+// Whether a row already in a list may stay: it is still in the list's folder,
+// though perhaps no longer unread or in the category it was filtered by.
+const inFolder = (messageLabels: string[][], folder: string) => belongs(messageLabels, listQuery(folder, {}))
 
 // The account's cached lists that can be matched locally.
 function* listsOf(account: string) {
@@ -67,43 +66,41 @@ const replaced = (data: ListData, row: ThreadRow): ListData => ({
   pages: data.pages.map((page) => ({ ...page, rows: page.rows.map((r) => (idOf(r) === idOf(row) ? row : r)) })),
 })
 
-// A row joins in date order among the loaded rows, so new mail lands on top;
-// one older than all of them waits for its page, unless every page is loaded.
-// All inboxes sorts rows itself: there it joins the first page that asked its
-// account.
+// A row joins in date order among its account's loaded rows, so new mail lands
+// on top. One older than all of them waits for its page while the account has
+// more to load.
 function inserted(key: readonly unknown[], data: ListData, row: ThreadRow): ListData | undefined {
+  const all = isAllInboxes(key)
   const pages = data.pages.map((page) => ({ ...page, rows: [...page.rows] }))
-  if (isAllInboxes(key)) {
-    const page = pages.find((it) => row.account in ((it as unknown as AllInboxesPage).tokens ?? {}))
-    if (!page) return undefined
-    page.rows.unshift(row)
-    return { ...data, pages }
-  }
   const time = Date.parse(row.date)
   for (const page of pages) {
-    const at = page.rows.findIndex((r) => Date.parse(r.date) <= time)
+    const at = page.rows.findIndex((r) => r.account === row.account && Date.parse(r.date) <= time)
     if (at >= 0) {
       page.rows.splice(at, 0, row)
       return { ...data, pages }
     }
   }
-  const last = pages.at(-1)
-  if (!last || last.nextPageToken) return undefined
+  const allPages = pages as unknown as AllInboxesPage[]
+  const more = all ? !toAccountPages(allPages, [row.account])[0]!.exhausted : !!pages.at(-1)?.nextPageToken
+  const last = all ? pages[allPages.findLastIndex((it) => row.account in it.tokens)] : pages.at(-1)
+  if (!last || more) return undefined
   last.rows.push(row)
   return { ...data, pages }
 }
 
 // Puts a row from the server into each list: a new message moves its thread
-// to the top; otherwise the row is updated where it is, joins the lists it
-// now belongs in, and leaves the folders it left.
-function place(row: ThreadRow, moved: boolean) {
+// up; otherwise the row is updated where it is, joins the lists it now
+// belongs in, and leaves the folders it left.
+function place(row: ThreadRow, messageLabels: string[][], moved: boolean) {
   const id = idOf(row)
   for (const [key, data] of listsOf(row.account)) {
     const present = contains(data, id)
-    const query = queryOf(key) as ListQuery
     let next: ListData | undefined
-    if (belongs(row, query) && (moved || !present)) next = inserted(key, without(data, id), row)
-    else if (present) next = inFolder(row.labelIds, String(key[3])) ? replaced(data, row) : without(data, id)
+    if (belongs(messageLabels, queryOf(key) as ListQuery) && (moved || !present)) {
+      next = inserted(key, without(data, id), row)
+    } else if (present) {
+      next = inFolder(messageLabels, String(key[3])) ? replaced(data, row) : without(data, id)
+    }
     if (next) queryClient.setQueryData(key, next)
   }
 }
@@ -115,86 +112,77 @@ function forget(account: string, threadId: string) {
   }
 }
 
-function cachedRow(account: string, threadId: string): ThreadRow | undefined {
-  const id = idOf({ account, threadId })
-  for (const [, data] of listsOf(account)) {
-    for (const page of data.pages) {
-      const found = page.rows.find((r) => idOf(r) === id)
-      if (found) return found
-    }
-  }
-}
-
-// Patches the thread's cached rows and remembers it as patched in `known`,
-// even after it has left every list, so a list it joins later in the same
-// history (Trash) can still take it.
-function relabel(account: string, threadId: string, ops: LabelOps, known: Map<string, ThreadRow>) {
-  const before = cachedRow(account, threadId) ?? known.get(threadId)
-  patchRows(
-    new Set([idOf({ account, threadId })]),
-    ops,
-    (row, key) => !isSearch(key) && !inFolder(row.labelIds, String(key[3])),
-  )
-  if (before) known.set(threadId, { ...before, labelIds: patchLabels(before.labelIds, ops) })
-}
-
 const fetchRow = (account: string, threadId: string) =>
-  getThreadRow(account, threadId).catch((err) => {
+  getThreadRowWithLabels(account, threadId).catch((err) => {
     if (isNotFound(err)) return null
     throw err
   })
 
+const isDraft = ({ message }: { message: { labelIds?: string[] } }) => !!message.labelIds?.includes('DRAFT')
+
 // Replays an account's history onto the cached lists and open threads.
 export async function applyHistory(account: string, records: HistoryRecord[]): Promise<'patched' | 'reload'> {
   if (records.length > MAX_RECORDS) return 'reload'
+  // Every changed thread is refetched once: only its messages' own labels say
+  // which lists it is in. The label patch below is just what shows meanwhile.
+  const refetch = new Set<string>()
   const added = new Set<string>()
-  const deleted = new Set<string>()
-  const labeled = new Set<string>()
-  const known = new Map<string, ThreadRow>()
+  const contentChanged = new Set<string>()
+  let drafts = false
+  const relabel = (threadId: string, ops: { add: string[]; remove: string[] }) =>
+    patchRows(new Set([idOf({ account, threadId })]), ops, () => false)
   for (const record of records) {
-    for (const { message } of record.messagesAdded ?? []) added.add(message.threadId)
-    for (const { message } of record.messagesDeleted ?? []) deleted.add(message.threadId)
-    for (const { message, labelIds } of record.labelsAdded ?? []) {
-      relabel(account, message.threadId, { add: labelIds, remove: [] }, known)
-      labeled.add(message.threadId)
-    }
-    for (const { message, labelIds } of record.labelsRemoved ?? []) {
-      relabel(account, message.threadId, { add: [], remove: labelIds }, known)
+    const changes = [
+      ...(record.messagesAdded ?? []).map((it) => ({ ...it, kind: 'added' as const })),
+      ...(record.messagesDeleted ?? []).map((it) => ({ ...it, kind: 'deleted' as const })),
+      ...(record.labelsAdded ?? []).map((it) => ({ ...it, kind: 'labelAdded' as const })),
+      ...(record.labelsRemoved ?? []).map((it) => ({ ...it, kind: 'labelRemoved' as const })),
+    ]
+    for (const change of changes) {
+      // Saving a draft adds and deletes a message each time; it only matters
+      // to Drafts.
+      if (isDraft(change)) {
+        drafts = true
+        continue
+      }
+      const { threadId } = change.message
+      refetch.add(threadId)
+      if (change.kind === 'added') added.add(threadId)
+      if (change.kind === 'added' || change.kind === 'deleted') contentChanged.add(threadId)
+      if (change.kind === 'labelAdded') relabel(threadId, { add: change.labelIds, remove: [] })
+      if (change.kind === 'labelRemoved') relabel(threadId, { add: [], remove: change.labelIds })
     }
   }
-  if (records.length) {
+  const lists = (match: (key: readonly unknown[]) => boolean) =>
     void queryClient.invalidateQueries({
-      predicate: (q) => q.queryKey[1] === 'list' && isSearch(q.queryKey) && showsAccount(q.queryKey, account),
+      predicate: ({ queryKey: key }) =>
+        key[0] === 'mail' && key[1] === 'list' && showsAccount(key, account) && match(key),
     })
-  }
-  const refetch = [...new Set([...added, ...deleted])]
-  await mapLimit(refetch, 4, async (threadId) => {
-    const row = await fetchRow(account, threadId)
-    void queryClient.invalidateQueries({ queryKey: mailKeys.thread(account, threadId) })
-    if (row) place(row, added.has(threadId))
+  if (refetch.size) lists(isSearch)
+  if (drafts) lists((key) => key[3] === 'DRAFT')
+  await mapLimit([...refetch], 4, async (threadId) => {
+    const fetched = await fetchRow(account, threadId)
+    if (contentChanged.has(threadId)) {
+      void queryClient.invalidateQueries({ queryKey: mailKeys.thread(account, threadId) })
+    }
+    if (fetched) place(fetched.row, fetched.messageLabels, added.has(threadId))
     else forget(account, threadId)
   })
-  // A label can bring a row into a list it wasn't in.
-  await mapLimit(
-    [...labeled].filter((it) => !refetch.includes(it)),
-    4,
-    async (threadId) => {
-      const row = known.get(threadId) ?? (await fetchRow(account, threadId))
-      if (row) place(row, false)
-    },
-  )
   return 'patched'
 }
 
-// Every cached mail query of the account, All inboxes included.
+// Every cached mail query of the account, its share of All inboxes included.
+// Open threads too: history that can't be replayed may have changed them.
 const ofAccount = (account: string) => (q: Query) =>
-  q.queryKey[0] === 'mail' && (q.queryKey[2] === account || (q.queryKey[1] === 'list' && isAllInboxes(q.queryKey)))
+  q.queryKey[0] === 'mail' &&
+  (q.queryKey[1] === 'list' ? showsAccount(q.queryKey, account) : q.queryKey[2] === account)
 
 // Keeps the cached lists current from each account's history. At most one
-// check runs at a time; a call while one runs gets that one.
+// check runs at a time; calls made during one share a single run after it.
 export function createLiveChecker(accounts: () => string[]) {
   const lastHistoryId = new Map<string, string>()
   let running: Promise<void> | undefined
+  let queued: Promise<void> | undefined
 
   async function check(account: string) {
     const { historyId } = await getProfile(account)
@@ -211,12 +199,19 @@ export function createLiveChecker(accounts: () => string[]) {
   }
 
   function checkNow(): Promise<void> {
-    running ??= Promise.all(
+    if (running) {
+      queued ??= running.then(() => {
+        queued = undefined
+        return checkNow()
+      })
+      return queued
+    }
+    running = Promise.all(
       accounts().map((account) =>
-        check(account).catch((err) => {
+        check(account).catch(async (err) => {
           // A signed-out account waits for Reconnect; anything else for the
           // next check.
-          if (!(err instanceof OAuthError)) console.warn('live update failed', account, err)
+          if (!(err instanceof OAuthError)) await debugLog('live update failed', account, err)
         }),
       ),
     ).then(() => {

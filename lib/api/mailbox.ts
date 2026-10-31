@@ -72,6 +72,8 @@ const labelsOf = (thread: GmailThread) => [...new Set(thread.messages.flatMap((i
 function threadToRow(account: string, thread: GmailThread): ThreadRow {
   const first = thread.messages[0]!
   const last = thread.messages.at(-1)!
+  // A draft being written would otherwise move the thread up with every save.
+  const dated = thread.messages.findLast((it) => !it.labelIds?.includes('DRAFT')) ?? last
   return {
     url: threadUrl(account, thread.id),
     account,
@@ -80,7 +82,7 @@ function threadToRow(account: string, thread: GmailThread): ThreadRow {
     snippet: decodeEntities(last.snippet ?? thread.snippet ?? ''),
     from: parseMailbox(header(last.payload, 'From') ?? ''),
     to: parseAddressField(header(last.payload, 'To') ?? ''),
-    date: new Date(Number(last.internalDate)).toISOString(),
+    date: new Date(Number(dated.internalDate)).toISOString(),
     labelIds: labelsOf(thread),
     messageCount: thread.messages.length,
     // Metadata format has no parts; a mixed top level is how attachments show.
@@ -112,10 +114,17 @@ export async function listThreadPage(
 const ROW_METADATA = ROW_HEADERS.map((it) => `metadataHeaders=${it}`).join('&')
 
 export async function getThreadRow(account: string, threadId: string): Promise<ThreadRow> {
-  return threadToRow(
-    account,
-    await gmailFetch<GmailThread>(account, `/threads/${threadId}?format=metadata&${ROW_METADATA}`),
-  )
+  return (await getThreadRowWithLabels(account, threadId)).row
+}
+
+// The row plus each message's own labels: a thread is in a folder when one of
+// its messages is, which the row's union can't tell.
+export async function getThreadRowWithLabels(
+  account: string,
+  threadId: string,
+): Promise<{ row: ThreadRow; messageLabels: string[][] }> {
+  const thread = await gmailFetch<GmailThread>(account, `/threads/${threadId}?format=metadata&${ROW_METADATA}`)
+  return { row: threadToRow(account, thread), messageLabels: thread.messages.map((it) => it.labelIds ?? []) }
 }
 
 // gmailFetch's error carries the HTTP status.

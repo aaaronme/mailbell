@@ -1,3 +1,5 @@
+import { debugLog } from './debugLog'
+
 // While Mailbell is on screen, mail should show up within seconds rather than
 // at the next alarm. Kept free of React: the background imports it.
 export const FAST_POLL_MS = 10_000
@@ -23,6 +25,9 @@ export function createFastPoll(poll: () => Promise<void>) {
     running = true
     try {
       await poll()
+    } catch (err) {
+      // A failed poll (offline) must not end the chain.
+      await debugLog('fast poll failed ->', err)
     } finally {
       running = false
       schedule()

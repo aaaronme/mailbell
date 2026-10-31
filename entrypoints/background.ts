@@ -136,9 +136,7 @@ async function start() {
   }
   // fetchThreads skips itself while the profile's historyId is unchanged, so
   // polling this often is cheap.
-  const fastPoll = createFastPoll(() =>
-    stateManager.fetchThreads().catch((err) => debugLog('background: fast poll failed ->', err)),
-  )
+  const fastPoll = createFastPoll(() => stateManager.fetchThreads())
   let nextViewId = 0
   browser.runtime.onConnect.addListener(async (port) => {
     if (port.name === 'popup') {

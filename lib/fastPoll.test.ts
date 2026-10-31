@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createFastPoll, FAST_POLL_MS } from './fastPoll'
+import { createFastPoll, FAST_POLL_MS, isVisibleMessage } from './fastPoll'
 
 describe('fastPoll', () => {
   beforeEach(() => {
@@ -7,6 +7,7 @@ describe('fastPoll', () => {
   })
   afterEach(() => {
     vi.useRealTimers()
+    vi.restoreAllMocks()
   })
 
   it('polls at once when a view becomes visible, then every 10 s', async () => {
@@ -73,6 +74,24 @@ describe('fastPoll', () => {
     await vi.advanceTimersByTimeAsync(60_000)
     expect(overlapped).toBe(false)
     expect(starts.map((it) => it - t0)).toEqual([0, 25_000, 50_000])
+  })
+
+  it('keeps polling after a poll rejects', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const poll = vi.fn(async () => {
+      if (poll.mock.calls.length === 1) throw new Error('offline')
+    })
+    const fast = createFastPoll(poll)
+    fast.setVisible('t1', true)
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(poll).toHaveBeenCalledTimes(3)
+  })
+
+  it('recognizes visibility messages and ignores the heartbeat', () => {
+    expect(isVisibleMessage({ type: 'visible', visible: false })).toBe(true)
+    expect(isVisibleMessage('heartbeat')).toBe(false)
+    expect(isVisibleMessage(null)).toBe(false)
+    expect(isVisibleMessage({ type: 'other' })).toBe(false)
   })
 
   it('a view shown again mid-poll does not start a second one', async () => {

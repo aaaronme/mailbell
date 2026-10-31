@@ -136,7 +136,7 @@ export interface LabelOps {
   remove: string[]
 }
 
-export const patchLabels = (labelIds: string[], { add, remove }: LabelOps) => [
+const patchLabels = (labelIds: string[], { add, remove }: LabelOps) => [
   ...new Set([...labelIds.filter((it) => !remove.includes(it)), ...add]),
 ]
 

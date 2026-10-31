@@ -8,33 +8,36 @@ vi.mock('@/lib/messager', () => ({ bgMessager: { sendMessage: vi.fn(async () => 
 const ME = 'me@gmail.com'
 const INBOX_Q = { labelIds: ['INBOX'], includeSpamTrash: false }
 const STARRED_Q = { labelIds: ['STARRED'], includeSpamTrash: false }
+const TRASH_Q = { labelIds: ['TRASH'], includeSpamTrash: true }
 
 const row = (threadId: string, labelIds: string[], date: string, account = ME) =>
   ({ account, threadId, url: 'u' + threadId, labelIds, date }) as ThreadRow
 
-// Thread metadata as Gmail returns it, for the row fetch.
-const metadata = (id: string, labelIds: string[], date: number) => ({
+// Thread metadata as Gmail returns it, one [labels, date] per message.
+const metadata = (id: string, messages: [string[], string][]) => ({
   id,
   historyId: '1',
-  messages: [
-    {
-      id: 'm' + id,
-      threadId: id,
-      labelIds,
-      snippet: 'snip',
-      internalDate: String(date),
-      payload: {
-        mimeType: 'text/plain',
-        headers: [
-          { name: 'From', value: 'Ann <a@x.com>' },
-          { name: 'Subject', value: 'Subject ' + id },
-        ],
-      },
+  messages: messages.map(([labelIds, date], i) => ({
+    id: `m${id}${i}`,
+    threadId: id,
+    labelIds,
+    snippet: 'snip',
+    internalDate: String(Date.parse(date)),
+    payload: {
+      mimeType: 'text/plain',
+      headers: [
+        { name: 'From', value: 'Ann <a@x.com>' },
+        { name: 'Subject', value: 'Subject ' + id },
+      ],
     },
-  ],
+  })),
 })
 
 const msg = (threadId: string, labelIds: string[] = []) => ({ message: { id: 'm' + threadId, threadId, labelIds } })
+
+const D30 = '2026-10-30T00:00:00Z'
+const D29 = '2026-10-29T00:00:00Z'
+const D31 = '2026-10-31T00:00:00Z'
 
 describe('live updates', () => {
   let live: typeof import('./live')
@@ -44,11 +47,16 @@ describe('live updates', () => {
   let threads: Record<string, unknown>
   const inboxKey = () => mailKeys.list(ME, 'INBOX', INBOX_Q)
   const starredKey = () => mailKeys.list(ME, 'STARRED', STARRED_Q)
+  const trashKey = () => mailKeys.list(ME, 'TRASH', TRASH_Q)
   const seed = (key: readonly unknown[], rows: ThreadRow[]) =>
     queryClient.setQueryData(key, { pages: [{ rows }], pageParams: [undefined] })
   const rowsOf = (key: readonly unknown[]) =>
     (queryClient.getQueryData<{ pages: { rows: ThreadRow[] }[] }>(key)?.pages ?? []).flatMap((p) => p.rows)
   const ids = (key: readonly unknown[]) => rowsOf(key).map((r) => r.threadId)
+  const threadFetches = (id?: string) =>
+    fetchMock.mock.calls
+      .map((c) => new URL(String(c[0])).pathname)
+      .filter((p) => (id ? p.endsWith(`/threads/${id}`) : p.includes('/threads/')))
 
   beforeEach(async () => {
     live = await import('./live')
@@ -56,7 +64,10 @@ describe('live updates', () => {
     queryClient.clear()
     ;({ mailKeys } = await import('./queries'))
     setTokenSource(async () => 'T')
-    threads = {}
+    threads = {
+      A: metadata('A', [[['INBOX', 'UNREAD', 'STARRED'], D30]]),
+      B: metadata('B', [[['INBOX'], D29]]),
+    }
     fetchMock = vi.fn(async (url: string) => {
       const path = new URL(url).pathname.split('/users/me')[1]!
       const thread = threads[path.replace('/threads/', '')]
@@ -64,8 +75,8 @@ describe('live updates', () => {
       return Response.json({})
     })
     vi.stubGlobal('fetch', fetchMock)
-    seed(inboxKey(), [row('A', ['INBOX', 'UNREAD', 'STARRED'], '2026-10-30T00:00:00Z'), row('B', ['INBOX'], '2026-10-29T00:00:00Z')])
-    seed(starredKey(), [row('A', ['INBOX', 'UNREAD', 'STARRED'], '2026-10-30T00:00:00Z')])
+    seed(inboxKey(), [row('A', ['INBOX', 'UNREAD', 'STARRED'], D30), row('B', ['INBOX'], D29)])
+    seed(starredKey(), [row('A', ['INBOX', 'UNREAD', 'STARRED'], D30)])
   })
   afterEach(() => {
     setTokenSource(getAccessToken)
@@ -75,6 +86,7 @@ describe('live updates', () => {
 
   describe('applyHistory', () => {
     it('drops a row that lost INBOX from Inbox lists only', async () => {
+      threads.A = metadata('A', [[['UNREAD', 'STARRED'], D30]])
       const result = await live.applyHistory(ME, [{ labelsRemoved: [{ ...msg('A'), labelIds: ['INBOX'] }] }])
       expect(result).toBe('patched')
       expect(ids(inboxKey())).toEqual(['B'])
@@ -82,15 +94,16 @@ describe('live updates', () => {
       expect(rowsOf(starredKey())[0]!.labelIds).not.toContain('INBOX')
     })
 
-    it('a starred row joins the Starred list', async () => {
-      threads.B = metadata('B', ['INBOX', 'STARRED'], Date.parse('2026-10-29T00:00:00Z'))
+    it('a starred row is fetched and joins the Starred list', async () => {
+      threads.B = metadata('B', [[['INBOX', 'STARRED'], D29]])
       await live.applyHistory(ME, [{ labelsAdded: [{ ...msg('B'), labelIds: ['STARRED'] }] }])
+      expect(threadFetches('B')).toHaveLength(1)
       expect(ids(starredKey())).toEqual(['A', 'B'])
       expect(rowsOf(inboxKey()).find((r) => r.threadId === 'B')!.labelIds).toContain('STARRED')
     })
 
     it('a new thread goes to the top of the lists it belongs in', async () => {
-      threads.C = metadata('C', ['INBOX', 'UNREAD'], Date.parse('2026-10-31T00:00:00Z'))
+      threads.C = metadata('C', [[['INBOX', 'UNREAD'], D31]])
       await live.applyHistory(ME, [{ messagesAdded: [msg('C', ['INBOX', 'UNREAD'])] }])
       expect(ids(inboxKey())).toEqual(['C', 'A', 'B'])
       expect(rowsOf(inboxKey())[0]!.subject).toBe('Subject C')
@@ -98,55 +111,143 @@ describe('live updates', () => {
     })
 
     it('a new message moves its thread to the top, replacing the old row', async () => {
-      threads.B = metadata('B', ['INBOX', 'UNREAD'], Date.parse('2026-10-31T00:00:00Z'))
+      threads.B = metadata('B', [
+        [['INBOX'], D29],
+        [['INBOX', 'UNREAD'], D31],
+      ])
       await live.applyHistory(ME, [{ messagesAdded: [msg('B', ['INBOX', 'UNREAD'])] }])
       expect(ids(inboxKey())).toEqual(['B', 'A'])
       expect(rowsOf(inboxKey())[0]!.labelIds).toContain('UNREAD')
     })
 
     it('a read row loses UNREAD', async () => {
+      threads.A = metadata('A', [[['INBOX', 'STARRED'], D30]])
       await live.applyHistory(ME, [{ labelsRemoved: [{ ...msg('A'), labelIds: ['UNREAD'] }] }])
       expect(rowsOf(inboxKey())[0]!.labelIds).not.toContain('UNREAD')
       expect(rowsOf(starredKey())[0]!.labelIds).not.toContain('UNREAD')
     })
 
-    it('a trashed row leaves every list but Trash', async () => {
-      const trashKey = mailKeys.list(ME, 'TRASH', { labelIds: ['TRASH'], includeSpamTrash: true })
-      seed(trashKey, [])
+    it('a trashed thread leaves every list but Trash', async () => {
+      seed(trashKey(), [])
+      threads.A = metadata('A', [[['TRASH', 'UNREAD', 'STARRED'], D30]])
       await live.applyHistory(ME, [{ labelsAdded: [{ ...msg('A'), labelIds: ['TRASH'] }] }])
       expect(ids(inboxKey())).toEqual(['B'])
       expect(ids(starredKey())).toEqual([])
-      expect(ids(trashKey)).toEqual(['A'])
+      expect(ids(trashKey())).toEqual(['A'])
+    })
+
+    it('a thread that still has INBOX on another message stays in Inbox', async () => {
+      threads.B = metadata('B', [
+        [[], D29],
+        [['INBOX'], D30],
+      ])
+      await live.applyHistory(ME, [{ labelsRemoved: [{ ...msg('B'), labelIds: ['INBOX'] }] }])
+      expect(ids(inboxKey())).toEqual(['A', 'B'])
+    })
+
+    it('one trashed message keeps the thread in Inbox and adds it to Trash', async () => {
+      seed(trashKey(), [])
+      threads.B = metadata('B', [
+        [['TRASH'], D29],
+        [['INBOX'], D29],
+      ])
+      await live.applyHistory(ME, [{ labelsAdded: [{ ...msg('B'), labelIds: ['TRASH'] }] }])
+      expect(ids(inboxKey())).toEqual(['A', 'B'])
+      expect(ids(trashKey())).toEqual(['B'])
+    })
+
+    it('a reply on a thread with a trashed message keeps it in Inbox', async () => {
+      threads.B = metadata('B', [
+        [['TRASH'], D29],
+        [['INBOX', 'UNREAD'], D31],
+      ])
+      await live.applyHistory(ME, [{ messagesAdded: [msg('B', ['INBOX', 'UNREAD'])] }])
+      expect(ids(inboxKey())).toEqual(['B', 'A'])
+    })
+
+    it('an untrash puts the thread back in Inbox and takes it out of Trash', async () => {
+      queryClient.removeQueries({ queryKey: inboxKey() })
+      seed(inboxKey(), [row('A', ['INBOX'], D30)])
+      seed(trashKey(), [row('B', ['INBOX', 'TRASH'], D29)])
+      await live.applyHistory(ME, [{ labelsRemoved: [{ ...msg('B'), labelIds: ['TRASH'] }] }])
+      expect(ids(inboxKey())).toEqual(['A', 'B'])
+      expect(ids(trashKey())).toEqual([])
     })
 
     it('removes a thread whose last message was deleted', async () => {
+      delete threads.B
       await live.applyHistory(ME, [{ messagesDeleted: [msg('B')] }])
       expect(ids(inboxKey())).toEqual(['A'])
     })
 
-    it('patches All inboxes rows, and a new thread joins its own account', async () => {
+    it('a deleted message with others left replaces the row in place', async () => {
+      threads.A = metadata('A', [[['INBOX', 'UNREAD', 'STARRED'], D29]])
+      await live.applyHistory(ME, [{ messagesDeleted: [msg('A')] }])
+      expect(ids(inboxKey())).toEqual(['A', 'B'])
+      expect(rowsOf(inboxKey())[0]!.date).toBe(new Date(D29).toISOString())
+    })
+
+    it('fetches a thread once however many records name it', async () => {
+      await live.applyHistory(ME, [
+        { messagesAdded: [msg('A', ['INBOX'])] },
+        { labelsRemoved: [{ ...msg('A'), labelIds: ['UNREAD'] }] },
+        { labelsAdded: [{ ...msg('A'), labelIds: ['STARRED'] }] },
+        { messagesDeleted: [msg('A')] },
+      ])
+      expect(threadFetches()).toEqual([expect.stringMatching(/\/threads\/A$/)])
+    })
+
+    it('a draft only refreshes Drafts lists', async () => {
+      const draftsKey = mailKeys.list(ME, 'DRAFT', { labelIds: ['DRAFT'], includeSpamTrash: false })
+      seed(draftsKey, [])
+      const open = mailKeys.thread(ME, 'B')
+      queryClient.setQueryData(open, { labelIds: ['INBOX'] })
+      await live.applyHistory(ME, [{ messagesAdded: [msg('B', ['DRAFT'])] }, { messagesDeleted: [msg('B', ['DRAFT'])] }])
+      expect(threadFetches()).toEqual([])
+      expect(ids(inboxKey())).toEqual(['A', 'B'])
+      expect(queryClient.getQueryState(open)!.isInvalidated).toBe(false)
+      expect(queryClient.getQueryState(draftsKey)!.isInvalidated).toBe(true)
+      expect(queryClient.getQueryState(inboxKey())!.isInvalidated).toBe(false)
+    })
+
+    it('patches All inboxes rows, and a new thread joins its own account by date', async () => {
       const { allInboxesKey } = await import('./queries')
       const key = allInboxesKey(INBOX_Q, [ME, 'b@x.com'])
       queryClient.setQueryData(key, {
         pages: [
           {
-            rows: [row('A', ['INBOX'], '2026-10-30T00:00:00Z'), row('X', ['INBOX'], '2026-10-30T00:00:00Z', 'b@x.com')],
+            rows: [row('A', ['INBOX'], D30), row('X', ['INBOX'], D30, 'b@x.com')],
             tokens: { [ME]: null, 'b@x.com': null },
           },
         ],
         pageParams: [{}],
       })
-      threads.C = metadata('C', ['INBOX'], Date.parse('2026-10-31T00:00:00Z'))
+      threads.A = metadata('A', [[[], D30]])
+      threads.C = metadata('C', [[['INBOX'], D31]])
       await live.applyHistory(ME, [
         { labelsRemoved: [{ ...msg('A'), labelIds: ['INBOX'] }] },
         { messagesAdded: [msg('C', ['INBOX'])] },
       ])
-      expect(rowsOf(key).map((r) => `${r.account}/${r.threadId}`)).toEqual([`${ME}/C`, 'b@x.com/X'])
+      // All inboxes sorts its rows on read; only which rows are cached counts.
+      expect(rowsOf(key).map((r) => `${r.account}/${r.threadId}`).sort()).toEqual(['b@x.com/X', `${ME}/C`])
+    })
+
+    it('in All inboxes, an old thread waits for its page while the account has more', async () => {
+      const { allInboxesKey } = await import('./queries')
+      const key = allInboxesKey(INBOX_Q, [ME, 'b@x.com'])
+      queryClient.setQueryData(key, {
+        pages: [{ rows: [row('A', ['INBOX'], D30)], tokens: { [ME]: 'more', 'b@x.com': null } }],
+        pageParams: [{}],
+      })
+      threads.C = metadata('C', [[['INBOX'], '2026-01-01T00:00:00Z']])
+      await live.applyHistory(ME, [{ labelsAdded: [{ ...msg('C'), labelIds: ['INBOX'] }] }])
+      expect(ids(key)).toEqual(['A'])
     })
 
     it('invalidates search lists instead of matching them', async () => {
+      threads.A = metadata('A', [[[], D30]])
       const searchKey = mailKeys.list(ME, 'INBOX', { labelIds: [], q: 'hello', includeSpamTrash: false })
-      seed(searchKey, [row('A', ['INBOX'], '2026-10-30T00:00:00Z')])
+      seed(searchKey, [row('A', ['INBOX'], D30)])
       await live.applyHistory(ME, [{ labelsRemoved: [{ ...msg('A'), labelIds: ['INBOX'] }] }])
       expect(queryClient.getQueryState(searchKey)!.isInvalidated).toBe(true)
       expect(queryClient.getQueryState(inboxKey())!.isInvalidated).toBe(false)
@@ -171,7 +272,7 @@ describe('live updates', () => {
   describe('checkNow', () => {
     let profileId: string
     let historyStatus: number
-    const historyCalls = () => fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes('/history'))
+    const calls = (part: string) => fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes(part))
 
     beforeEach(() => {
       profileId = '100'
@@ -191,38 +292,48 @@ describe('live updates', () => {
       const { checkNow } = live.createLiveChecker(() => [ME])
       await checkNow()
       await checkNow()
-      expect(historyCalls()).toEqual([])
+      expect(calls('/history')).toEqual([])
     })
 
-    it('asks for history since the last id when it changed', async () => {
+    it('asks for history since the last id when it changed, and refreshes the counts', async () => {
       const { checkNow } = live.createLiveChecker(() => [ME])
+      queryClient.setQueryData(mailKeys.labels(ME), [])
       await checkNow()
+      expect(queryClient.getQueryState(mailKeys.labels(ME))!.isInvalidated).toBe(false)
       profileId = '105'
       await checkNow()
-      expect(historyCalls()).toHaveLength(1)
-      expect(new URL(historyCalls()[0]!).searchParams.get('startHistoryId')).toBe('100')
+      expect(calls('/history')).toHaveLength(1)
+      expect(new URL(calls('/history')[0]!).searchParams.get('startHistoryId')).toBe('100')
+      expect(queryClient.getQueryState(mailKeys.labels(ME))!.isInvalidated).toBe(true)
       await checkNow()
-      expect(historyCalls()).toHaveLength(1)
+      expect(calls('/history')).toHaveLength(1)
     })
 
     it('reloads the account on an expired history id, and moves on to the new one', async () => {
       const { checkNow } = live.createLiveChecker(() => [ME])
+      const { allInboxesKey } = await import('./queries')
       const other = mailKeys.list('b@x.com', 'INBOX', INBOX_Q)
+      const otherAll = allInboxesKey(INBOX_Q, ['b@x.com'])
+      const mineAll = allInboxesKey(INBOX_Q, [ME, 'b@x.com'])
       seed(other, [])
+      seed(otherAll, [])
+      seed(mineAll, [])
       await checkNow()
       profileId = '200'
       historyStatus = 404
       await checkNow()
       expect(queryClient.getQueryState(inboxKey())!.isInvalidated).toBe(true)
+      expect(queryClient.getQueryState(mineAll)!.isInvalidated).toBe(true)
       expect(queryClient.getQueryState(other)!.isInvalidated).toBe(false)
+      expect(queryClient.getQueryState(otherAll)!.isInvalidated).toBe(false)
       await checkNow()
-      expect(historyCalls()).toHaveLength(1)
+      expect(calls('/history')).toHaveLength(1)
     })
 
-    it('folds a call made while one runs into it', async () => {
+    it('runs once more after a run that calls arrived during, not once per call', async () => {
       const { checkNow } = live.createLiveChecker(() => [ME])
-      await Promise.all([checkNow(), checkNow()])
-      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('/profile'))).toHaveLength(1)
+      await Promise.all([checkNow(), checkNow(), checkNow()])
+      expect(calls('/profile')).toHaveLength(2)
     })
   })
 })
