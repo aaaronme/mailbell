@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { queryOptions, useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { getOpenThread, listLabels, listThreadPage, type ThreadRow } from '../api/mailbox'
 import { parseThreadUrl } from '../api/gmail'
 import type { MailSearch } from './search'
@@ -16,14 +16,15 @@ export const mailKeys = {
   thread: (account: string, threadId: string) => ['mail', 'thread', account, threadId] as const,
 }
 
-export function useLabels(account: string) {
-  return useQuery({
+export const labelsOptions = (account: string) =>
+  queryOptions({
     queryKey: mailKeys.labels(account),
     queryFn: () => listLabels(account),
     enabled: account !== 'all',
     staleTime: 60_000,
   })
-}
+
+export const useLabels = (account: string) => useQuery(labelsOptions(account))
 
 export interface ThreadListResult {
   rows: ThreadRow[]

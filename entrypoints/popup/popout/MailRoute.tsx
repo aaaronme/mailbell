@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import { ArrowLeftIcon, PanelLeftIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Sidebar } from './Sidebar'
 
 const route = getRouteApi('/mail')
 
@@ -16,8 +17,7 @@ export function useMediaQuery(query: string): boolean {
   )
 }
 
-// Tasks 10, 11 and 13 replace these.
-const Sidebar = () => <div data-testid="sidebar" className="h-full" />
+// Tasks 11 and 13 replace these.
 const ThreadList = () => <div data-testid="thread-list" className="min-h-0 flex-1" />
 const ReadingPane = () => <div data-testid="reading-pane" className="min-h-0 flex-1" />
 
@@ -101,7 +101,7 @@ function SidebarOverlay({ onClose }: { onClose: () => void }) {
     <>
       <div className="absolute inset-0 z-10 bg-foreground/10" onClick={onClose} />
       <div className="absolute inset-y-0 left-0 z-20 w-56 overflow-y-auto border-r border-foreground/10 bg-background">
-        <Sidebar />
+        <Sidebar onNavigate={onClose} />
       </div>
     </>
   )
