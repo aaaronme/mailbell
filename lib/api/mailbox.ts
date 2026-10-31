@@ -105,11 +105,65 @@ export async function listThreadPage(
     account,
     `/threads?${params}`,
   )
-  const meta = ROW_HEADERS.map((it) => `metadataHeaders=${it}`).join('&')
-  const rows = await mapLimit(list.threads ?? [], 4, async ({ id }) =>
-    threadToRow(account, await gmailFetch<GmailThread>(account, `/threads/${id}?format=metadata&${meta}`)),
-  )
+  const rows = await mapLimit(list.threads ?? [], 4, ({ id }) => getThreadRow(account, id))
   return { rows, nextPageToken: list.nextPageToken }
+}
+
+const ROW_METADATA = ROW_HEADERS.map((it) => `metadataHeaders=${it}`).join('&')
+
+export async function getThreadRow(account: string, threadId: string): Promise<ThreadRow> {
+  return threadToRow(
+    account,
+    await gmailFetch<GmailThread>(account, `/threads/${threadId}?format=metadata&${ROW_METADATA}`),
+  )
+}
+
+// gmailFetch's error carries the HTTP status.
+export const isNotFound = (err: unknown): boolean => (err as { status?: unknown } | null)?.status === 404
+
+export async function getProfile(account: string): Promise<{ historyId: string }> {
+  return gmailFetch<{ historyId: string }>(account, '/profile')
+}
+
+interface HistoryMessage {
+  message: { id: string; threadId: string; labelIds?: string[] }
+}
+
+// Only the fields live updates read.
+export interface HistoryRecord {
+  messagesAdded?: HistoryMessage[]
+  messagesDeleted?: HistoryMessage[]
+  labelsAdded?: (HistoryMessage & { labelIds: string[] })[]
+  labelsRemoved?: (HistoryMessage & { labelIds: string[] })[]
+}
+
+const HISTORY_TYPES = ['messageAdded', 'messageDeleted', 'labelAdded', 'labelRemoved']
+
+// Every change since startHistoryId. Gmail answers 404 for an id older than
+// the history it keeps: 'expired', so the caller reloads instead.
+export async function listHistory(
+  account: string,
+  startHistoryId: string,
+): Promise<{ history: HistoryRecord[]; historyId: string } | 'expired'> {
+  const history: HistoryRecord[] = []
+  let pageToken: string | undefined
+  try {
+    for (;;) {
+      const params = new URLSearchParams({ startHistoryId })
+      HISTORY_TYPES.forEach((it) => params.append('historyTypes', it))
+      if (pageToken) params.set('pageToken', pageToken)
+      const page = await gmailFetch<{ history?: HistoryRecord[]; historyId: string; nextPageToken?: string }>(
+        account,
+        `/history?${params}`,
+      )
+      history.push(...(page.history ?? []))
+      pageToken = page.nextPageToken
+      if (!pageToken) return { history, historyId: page.historyId }
+    }
+  } catch (err) {
+    if (isNotFound(err)) return 'expired'
+    throw err
+  }
 }
 
 export interface OpenThread extends ThreadMail {

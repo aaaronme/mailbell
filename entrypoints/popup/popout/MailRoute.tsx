@@ -14,10 +14,13 @@ import type { ReplyHandle } from '@/components/mail/ThreadView'
 import { useAccounts } from '@/lib/useAccounts'
 import { usePreload } from '@/lib/mail/preload'
 import { useMarkRead } from '@/lib/mail/markRead'
+import { useLiveUpdates } from '@/lib/mail/live'
 import { useOpenThread, useThreadList } from '@/lib/mail/queries'
 import { isSettingsChange, settingsOptions } from '@/lib/settings'
 
 const route = getRouteApi('/mail')
+
+const NO_ACCOUNTS: { email: string; needsReauth: boolean }[] = []
 
 export function useMediaQuery(query: string): boolean {
   return useSyncExternalStore(
@@ -44,7 +47,10 @@ export function MailRoute() {
   const [labelMenu, setLabelMenu] = useState<LabelMenu>(null)
   const readingRef = useRef<HTMLDivElement>(null)
   const replyRef = useRef<ReplyHandle>(null)
-  useBootstrapCorrespondents(useAccounts().data ?? [])
+  const accounts = useAccounts().data ?? NO_ACCOUNTS
+  useBootstrapCorrespondents(accounts)
+  // An account waiting for Reconnect would only fail every check.
+  useLiveUpdates(accounts.filter((it) => !it.needsReauth).map((it) => it.email))
   const { rows } = useThreadList(search)
   usePreload(rows, thread)
 

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAccessToken } from '../auth/oauth'
 import { setTokenSource, type GmailMessage } from './gmail'
-import { decodeEntities, listThreadPage, modifyThreads } from './mailbox'
+import { decodeEntities, listHistory, listThreadPage, modifyThreads } from './mailbox'
 
 function msg(id: string, date: number, from: string, labels: string[], contentType: string): GmailMessage {
   return {
@@ -68,6 +68,27 @@ describe('mailbox api', () => {
     for (const [, init] of posts) {
       expect(JSON.parse(init.body)).toEqual({ addLabelIds: ['INBOX'], removeLabelIds: [] })
     }
+  })
+
+  it('listHistory follows pages and asks for the four change types', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      const params = new URL(url).searchParams
+      return params.get('pageToken')
+        ? Response.json({ history: [{ messagesDeleted: [] }], historyId: '9' })
+        : Response.json({ history: [{ messagesAdded: [] }], historyId: '9', nextPageToken: 'p2' })
+    })
+    expect(await listHistory('me@gmail.com', '5')).toEqual({
+      history: [{ messagesAdded: [] }, { messagesDeleted: [] }],
+      historyId: '9',
+    })
+    const first = new URL(String(fetchMock.mock.calls[0]![0])).searchParams
+    expect(first.get('startHistoryId')).toBe('5')
+    expect(first.getAll('historyTypes')).toEqual(['messageAdded', 'messageDeleted', 'labelAdded', 'labelRemoved'])
+  })
+
+  it('listHistory maps a 404 to expired', async () => {
+    fetchMock.mockResolvedValue(new Response('', { status: 404 }))
+    expect(await listHistory('me@gmail.com', '5')).toBe('expired')
   })
 })
 

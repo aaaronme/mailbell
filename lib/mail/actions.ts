@@ -18,7 +18,7 @@ export interface ActionTarget {
 }
 
 type Page = { rows: ThreadRow[]; nextPageToken?: string }
-type ListData = InfiniteData<Page, string | undefined>
+export type ListData = InfiniteData<Page, string | undefined>
 
 export function labelOps(a: MailAction): { add: string[]; remove: string[] } | 'trash' | 'untrash' {
   switch (a.kind) {
@@ -131,11 +131,16 @@ function cacheOps(a: MailAction): { add: string[]; remove: string[] } {
   return labelOps(a) as { add: string[]; remove: string[] }
 }
 
-const patchLabels = (labelIds: string[], { add, remove }: { add: string[]; remove: string[] }) => [
+export interface LabelOps {
+  add: string[]
+  remove: string[]
+}
+
+export const patchLabels = (labelIds: string[], { add, remove }: LabelOps) => [
   ...new Set([...labelIds.filter((it) => !remove.includes(it)), ...add]),
 ]
 
-const LIST = ['mail', 'list'] as const
+export const LIST = ['mail', 'list'] as const
 
 // What patchCache changed, per list key, for the action's own rows only, so
 // rollback and undo never touch rows another action has since changed.
@@ -148,37 +153,48 @@ export interface Patch {
   threads: [readonly unknown[], unknown][]
 }
 
-const idOf = (it: { account: string; threadId: string }) => `${it.account}\n${it.threadId}`
+export const idOf = (it: { account: string; threadId: string }) => `${it.account}\n${it.threadId}`
 
-function patchCache(a: MailAction, targets: ActionTarget[]): Patch {
-  const ids = new Set(targets.map(idOf))
-  const ops = cacheOps(a)
-  const patch: Patch = {
-    lists: [],
-    threads: targets.flatMap((it) => queryClient.getQueriesData({ queryKey: mailKeys.thread(it.account, it.threadId) })),
-  }
+// Applies ops to the cached rows in ids, in every list and in the open
+// threads, dropping each row from the lists `drops` says it left (given the
+// patched row and the list's key). Shared with live updates.
+export function patchRows(
+  ids: Set<string>,
+  ops: LabelOps,
+  drops: (row: ThreadRow, key: readonly unknown[]) => boolean,
+): Patch['lists'] {
+  const lists: Patch['lists'] = []
   for (const [key, data] of queryClient.getQueriesData<ListData>({ queryKey: LIST })) {
     if (!data) continue
-    const remove = removesFromFolder(a, String(key[3]))
     const records: RowRecord[] = []
     const pages = data.pages.map((page, p) => ({
       ...page,
       rows: page.rows.flatMap((r, index) => {
         if (!ids.has(idOf(r))) return [r]
+        const next = { ...r, labelIds: patchLabels(r.labelIds, ops) }
+        const remove = drops(next, key)
         records.push(remove ? { row: r, removed: { page: p, index } } : { row: r })
-        return remove ? [] : [{ ...r, labelIds: patchLabels(r.labelIds, ops) }]
+        return remove ? [] : [next]
       }),
     }))
     if (!records.length) continue
-    patch.lists.push([key, records])
+    lists.push([key, records])
     queryClient.setQueryData<ListData>(key, { ...data, pages })
   }
-  for (const it of targets) {
-    queryClient.setQueryData<{ labelIds: string[] }>(mailKeys.thread(it.account, it.threadId), (open) =>
-      open ? { ...open, labelIds: patchLabels(open.labelIds, ops) } : open,
-    )
+  for (const [key, open] of queryClient.getQueriesData<{ labelIds: string[] }>({ queryKey: ['mail', 'thread'] })) {
+    if (open && ids.has(idOf({ account: String(key[2]), threadId: String(key[3]) }))) {
+      queryClient.setQueryData(key, { ...open, labelIds: patchLabels(open.labelIds, ops) })
+    }
   }
-  return patch
+  return lists
+}
+
+function patchCache(a: MailAction, targets: ActionTarget[]): Patch {
+  const threads = targets.flatMap((it) =>
+    queryClient.getQueriesData({ queryKey: mailKeys.thread(it.account, it.threadId) }),
+  )
+  const lists = patchRows(new Set(targets.map(idOf)), cacheOps(a), (_, key) => removesFromFolder(a, String(key[3])))
+  return { lists, threads }
 }
 
 // Puts the recorded rows back as they were, leaving every other row alone.

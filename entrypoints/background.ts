@@ -27,6 +27,7 @@ import { debugLog } from '@/lib/debugLog'
 import { openPopoutOn } from '@/lib/openPopout'
 import { playNotificationSound } from '@/lib/sound'
 import { getSettings, isSettingsChange, notificationSound } from '@/lib/settings'
+import { createFastPoll, isVisibleMessage } from '@/lib/fastPoll'
 
 const iconPaths = (dir: string) =>
   Object.fromEntries([16, 32, 48, 96, 128].map((size) => [size, `${dir}/${size}.png`])) as Record<number, string>
@@ -133,9 +134,21 @@ async function start() {
   async function pushRefreshToPopup(): Promise<void> {
     await popupMessager.sendMessage('refreshPopup', undefined)
   }
+  // fetchThreads skips itself while the profile's historyId is unchanged, so
+  // polling this often is cheap.
+  const fastPoll = createFastPoll(() =>
+    stateManager.fetchThreads().catch((err) => debugLog('background: fast poll failed ->', err)),
+  )
+  let nextViewId = 0
   browser.runtime.onConnect.addListener(async (port) => {
     if (port.name === 'popup') {
       if (openViews++ === 0) stateManager.on(pushRefreshToPopup)
+      // Before any await: the view posts its visibility as soon as it connects.
+      const viewId = String(nextViewId++)
+      port.onMessage.addListener((msg) => {
+        if (isVisibleMessage(msg)) fastPoll.setVisible(viewId, msg.visible)
+      })
+      port.onDisconnect.addListener(() => fastPoll.drop(viewId))
       await debugLog('background: popup port connected')
       port.onDisconnect.addListener(async function () {
         await debugLog('background: popup port disconnected')

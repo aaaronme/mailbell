@@ -9,6 +9,7 @@ import { parseThreadUrl, setTokenSource } from '@/lib/api/gmail'
 import { isPopoutTab } from './view'
 import { router } from './router'
 import { validateMailSearch } from './popout/mailSearch'
+import type { VisibleMessage } from '@/lib/fastPoll'
 
 // The toolbar popup sizes itself to its content, so a long unbroken subject
 // or address can widen it: pin the width (style.css). The Popout tab isn't
@@ -45,6 +46,17 @@ root.render(<App />)
 // can spin into a tight connect/disconnect loop.
 const RECONNECT_DELAY_MS = 2000
 
+// The background polls fast while any view is on screen; a reconnected port
+// is a new view to it, so each connection says so again.
+function postVisibility(port: ReturnType<typeof browser.runtime.connect>) {
+  const message: VisibleMessage = { type: 'visible', visible: document.visibilityState === 'visible' }
+  try {
+    port.postMessage(message)
+  } catch (err) {
+    console.error('posting visibility failed', err)
+  }
+}
+
 function connectToServiceWorker() {
   const port = browser.runtime.connect({ name: 'popup' })
   port.onDisconnect.addListener(async () => {
@@ -53,9 +65,11 @@ function connectToServiceWorker() {
       serviceWorkerConnection = connectToServiceWorker()
     }, RECONNECT_DELAY_MS)
   })
+  postVisibility(port)
   return port
 }
 let serviceWorkerConnection = connectToServiceWorker()
+document.addEventListener('visibilitychange', () => postVisibility(serviceWorkerConnection))
 setInterval(() => {
   try {
     serviceWorkerConnection.postMessage('heartbeat')
