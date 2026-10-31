@@ -26,7 +26,7 @@ In the owner's words: "basically just copy Mimestream but as a browser extension
 - **The toolbar popup doesn't change** beyond the shared mail view (sender identity, remote-content protection) and the compose button. It keeps its unread list, its plain-text quick reply and its "Open in Gmail" links. The owner said it is "mostly ok" as is.
 - **No full offline mirror of the mailbox:** folders load on demand, page by page.
 - **No permanent delete:** "Delete forever" and "Empty trash" need the full `https://mail.google.com/` scope, which this project doesn't request.
-- **No servers and no push.** Polling stays as it is.
+- **No servers and no push.** Gmail only pushes through Cloud Pub/Sub, which would need every user to set up a topic and grant an extra scope. Instead, checks speed up while Mailbell is open (see **Freshness**), and the background polling stays as it is otherwise.
 
 ## Anti-goals (failure even if it works)
 
@@ -107,7 +107,12 @@ In the owner's words: "basically just copy Mimestream but as a browser extension
   - The full threads for the first rows of a folder, and for the few rows either side of the selection, are fetched in the background, so `j`/`k` show the next mail without waiting. My call: the first 10 rows and 3 each side.
   - Preloading never marks anything read, and it runs at low concurrency so it doesn't delay what the user actually clicked.
   - Inline images are fetched with the thread; remote content follows the rules under **Remote content and suspicious mail**.
-- **Freshness:** when the background poll sees a new `historyId` it already pushes `refreshPopup`; the popout invalidates its folder and label-count queries on that push. After any action, the affected rows update at once (optimistic), and the background is asked to poll so the badge and the popup agree.
+- **Freshness** *(owner: "live updates while in the extension")*:
+  - While a Mailbell view (popup or popout) is open **and visible**, the background checks every 10 seconds instead of every `pollMinutes`. The existing check is cheap: one `users/me/profile` call, with the folder only re-read when the `historyId` changed. Once no view is visible, it goes back to the alarm.
+  - Opening the popup or bringing the popout tab back into focus checks at once.
+  - The popout keeps the last `historyId` per account and runs its own 10-second profile check while visible. On a change, it reads `history.list` from that id and patches its caches in place: new messages become rows at the top of the folders they belong to, label changes update rows or remove them from folders they've left, and deleted messages disappear. If the history is too old (404) or the change is too large to patch, it reloads the affected queries instead.
+  - The background still pushes `refreshPopup` when its inbox state changes; the popout treats that as "check now".
+  - After any action, the affected rows update at once (optimistic), and the background is asked to poll so the badge and the popup agree.
 - **Existing code:** the popup's unread list, `StateManager` and the inbox cache stay as they are, and the popout doesn't depend on them.
 
 ### Sender identity

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn the popout tab (`popup.html?view=tab`) into a three-pane Gmail reader (sidebar, thread list, reading pane) with every folder, All inboxes, categories, search, paging, multi-select, sender identity, remote-content and suspicious-mail protection, undoable actions, labels menus, Gmail keyboard shortcuts, preloading, mark-read, and notification clicks that open the popout.
+**Goal:** Turn the popout tab (`popup.html?view=tab`) into a three-pane Gmail reader (sidebar, thread list, reading pane) with every folder, All inboxes, categories, search, paging, multi-select, sender identity, remote-content and suspicious-mail protection, undoable actions, labels menus, Gmail keyboard shortcuts, preloading, mark-read, and notification clicks that open the popout, and live updates (10-second checks with in-place patches) while Mailbell is open.
 
 **Architecture:** The popout gets its own route (`/mail`) whose search params hold the account, folder, category, query and selected thread. In the popout, the router uses hash history, so reload, back and forward work. The toolbar popup keeps memory history and its existing routes untouched. The page calls `gmail.googleapis.com` directly through the existing `gmailFetch`. Its token source is swapped, in the page only, for a `getAccessToken` message to the background, so only the background ever refreshes or stores tokens. Pure logic lives in `lib/mail/*` with unit tests:
 - identity, suspicion and remote-content rules;
@@ -34,6 +34,7 @@ React components live in `entrypoints/popup/popout/*` and `components/mail/*`. T
 - Nothing in the popout navigates to `mail.google.com`, except an explicit "Open in Gmail" item in an overflow menu. `c` (compose) still calls `newEmail()` until Part 2 replaces it; that is accepted, since the parts are released together.
 - These values are fixed:
   - undo toast duration 6000 ms, with one toast at a time (sonner id `'undo'`);
+  - live checks every 10 000 ms while a view is visible;
   - mark-read delay 2000 ms;
   - preload of the first 10 rows plus 3 on each side of the selection, at a concurrency of 2;
   - `threads.list` `maxResults` 50;
@@ -44,7 +45,7 @@ React components live in `entrypoints/popup/popout/*` and `components/mail/*`. T
 
 ## Review Focus
 
-1. **A thread changes under an open view.** The poll arrives, or a thread is acted on in the popup while the popout shows it. Expect the list to refresh without losing the selection or the scroll position, and the reading pane not to blank. *Test: Task 16, "refreshPopup keeps the selected thread selected".*
+1. **A thread changes under an open view.** The poll arrives, or a thread is acted on in the popup while the popout shows it. Expect the list to refresh without losing the selection or the scroll position, and the reading pane not to blank. *Test: Task 17, "refreshPopup keeps the selected thread selected".*
 2. **Undo after the row has already gone,** including after a newer action replaced the toast. Expect `z` to undo only the most recent action, and an undo of an action whose API call failed not to be offered. *Test: Task 7, "a failed action offers no undo" and "z undoes only the latest".*
 3. **A mail with no `Authentication-Results`, or with several** (forwarded mail carries old ones). Expect only Gmail's own header to count, which is the first header, added by `mx.google.com`; with none, the status is "unverified", never "failed". *Test: Task 3, "uses only the first mx.google.com header" and "missing header is unverified".*
 4. **Remote content smuggled past the image rule:**
@@ -79,6 +80,7 @@ React components live in `entrypoints/popup/popout/*` and `components/mail/*`. T
 | `lib/mail/preload.ts` | `preloadTargets(...)` and a concurrency-2 prefetch queue |
 | `lib/mail/queries.ts` | Query keys and hooks: labels, thread list (infinite), All inboxes, thread |
 | `lib/mail/markRead.ts` | `useMarkRead(...)` |
+| `lib/mail/live.ts` | The popout's own `historyId` check, `history.list` → cache patches |
 | `components/mail/ThreadView.tsx` | The thread view moved out of `DetailPage` (messages, collapse, attachments, meeting bar, reply box) |
 | `components/mail/SenderHeader.tsx` | Name and full address, emphasised domain, check mark / via / failed, details toggle, "Replies go to", first-time note |
 | `components/mail/ProtectedContent.tsx` | The remote-content bar and the suspicious safe view around `MailContent` |
@@ -97,7 +99,7 @@ Each file gets a `.test.ts(x)` next to it, where a task says so.
 
 - `lib/api/gmail.ts`: token source injection, exports, identity on `Message`, extract version 4.
 - `lib/messager.ts`: `getAccessToken` (bg) and `openThread` (popup).
-- `entrypoints/background.ts`: the `getAccessToken` handler and the notification click.
+- `entrypoints/background.ts`: the `getAccessToken` handler, the notification click, and the fast check while a view is visible.
 - `entrypoints/popup/main.tsx`: page token source, and the `openThread` listener in the popout.
 - `entrypoints/popup/router.tsx`: the `/mail` route, hash history in the popout, `/` → `/mail` in the popout.
 - `entrypoints/popup/App.tsx`: invalidates the mail queries on `refreshPopup`.
@@ -703,15 +705,75 @@ Each file gets a `.test.ts(x)` next to it, where a task says so.
 - [ ] **Step 4: Run them**, then `pnpm compile`. Expected: PASS.
 - [ ] **Step 5: Commit** `feat: notification click opens the popout on that mail`.
 
-### Task 16: Freshness and final verification
+### Task 16: Live updates while Mailbell is open
+
+**Files:**
+- Create: `lib/mail/live.ts`
+- Modify: `lib/messager.ts` (bg gains `viewVisible(visible: boolean): void`), `entrypoints/background.ts` (the port handler at about line 133 and the alarm block at about line 159), `entrypoints/popup/main.tsx`, `entrypoints/popup/popout/MailRoute.tsx`, and `lib/api/mailbox.ts` (`getProfile`, `listHistory`)
+- Test: `lib/mail/live.test.ts`, `entrypoints/background.test.ts` (create if absent; else put the timer logic in `lib/fastPoll.ts` with `lib/fastPoll.test.ts`)
+
+**Interfaces:**
+- Consumes: `gmailFetch` (Task 1), `mailKeys` and the `ThreadRow`/`listThreadPage` metadata fetch (Task 2), `labelOps`-style row patching from `lib/mail/actions.ts` (Task 7; reuse its patch helper rather than writing a second one).
+- Produces (`mailbox.ts`):
+  - `getProfile(account): Promise<{ historyId: string }>`;
+  - `listHistory(account, startHistoryId): Promise<{ history: HistoryRecord[]; historyId: string } | 'expired'>`. It follows `nextPageToken`, uses `historyTypes=messageAdded&historyTypes=messageDeleted&historyTypes=labelAdded&historyTypes=labelRemoved`, and maps a 404 to `'expired'`;
+  - `HistoryRecord` has only the used fields: `messagesAdded`, `messagesDeleted`, `labelsAdded` and `labelsRemoved`, each carrying `message: { id, threadId, labelIds }` and, for the label kinds, `labelIds`.
+- Produces (`lib/fastPoll.ts`, used by `background.ts`):
+  - `FAST_POLL_MS = 10_000`;
+  - `createFastPoll(poll: () => Promise<void>)` returns `{ setVisible(viewId: string, visible: boolean): void; drop(viewId: string): void }`.
+    - While any view is visible, it runs `poll` every 10 s with `setTimeout` chaining, so a run never overlaps the next. The open port keeps the worker alive.
+    - When the count of visible views goes from 0 to 1, it polls at once.
+    - When no view is visible, it stops. The `fetchThreads` alarm is untouched and keeps running.
+  - In `background.ts`, `poll` is `stateManager.fetchThreads()`, which already short-circuits on an unchanged profile `historyId`.
+  - `viewVisible` messages carry the sender's port name and id. The id is `sender.tab?.id ?? 'popup'`; a disconnecting port calls `drop`.
+- Produces (`main.tsx`): on load and on every `visibilitychange`, `bgMessager.sendMessage('viewVisible', document.visibilityState === 'visible')`.
+- Produces (`live.ts`):
+  - `applyHistory(account: string, records: HistoryRecord[]): Promise<'patched' | 'reload'>`:
+    - `labelsAdded` / `labelsRemoved` patch the `labelIds` of cached rows and threads. A row leaves every cached list whose folder label it lost: INBOX removed → gone from Inbox lists; TRASH or SPAM added → gone from every list except that folder.
+    - `messagesAdded` fetch that thread's row (the metadata call from Task 2) and put it at the top of each cached first page whose `listQuery` labels it has, replacing an existing row with the same `threadId`.
+    - `messagesDeleted` remove the row when its thread has no messages left; otherwise refetch the row.
+    - More than 50 records → `'reload'`.
+    - A cached list whose query has `q` (search) can't be matched locally → invalidate just that query.
+  - `useLiveUpdates(accounts: string[])` lives in `MailRoute`:
+    - it keeps `lastHistoryId` per account in a ref, seeded from `getProfile` on mount;
+    - while `document.visibilityState === 'visible'`, every `FAST_POLL_MS` and on `focus`, it runs `checkNow()`;
+    - `checkNow()`: for each account, `getProfile`; if the id changed, `listHistory`; `'expired'` or `'reload'` → `invalidateQueries({ queryKey: ['mail'] })` for that account; then store the new id;
+    - it is exported for Task 17's `refreshPopup` hook;
+    - it also invalidates `mailKeys.labels(account)` when anything changed, so the counts follow;
+    - at most one `checkNow` runs at a time; a call while one runs is folded into it.
+
+- [ ] **Step 1: Write the failing tests:**
+  - `fastPoll` (fake timers):
+    - `setVisible('t1', true)` → `poll` is called at once, then again at 10 s and at 20 s;
+    - `setVisible('t1', false)` at 25 s → no call at 30 s;
+    - two views, one hidden → it keeps polling;
+    - `drop` of the last visible view → it stops;
+    - a `poll` that takes 15 s → the next call starts 10 s after it resolves, never overlapping.
+  - `applyHistory`:
+    - seed an INBOX list holding A and B and a STARRED list holding A;
+    - `labelsRemoved INBOX` on A → the INBOX list is `[B]` and STARRED still has A;
+    - `labelsAdded STARRED` on B → after the metadata fetch, the STARRED list contains B (B is inserted only if its row data is cached or fetched);
+    - `messagesAdded` on a new thread C labeled INBOX/UNREAD → C is the first row of the INBOX list, and the STARRED list is unchanged;
+    - `labelsRemoved UNREAD` on A → A's row no longer has UNREAD;
+    - 51 records → `'reload'`.
+  - `checkNow`:
+    - an unchanged profile `historyId` → no `history` request;
+    - a changed id → one `history` request with `startHistoryId=<old>`;
+    - a 404 from history → `['mail']` queries for that account are invalidated, and the stored id is updated.
+- [ ] **Step 2: Run them.** `pnpm vitest run lib/fastPoll.test.ts lib/mail/live.test.ts`. Expected: FAIL.
+- [ ] **Step 3: Implement**, and wire it into `background.ts`, `main.tsx` and `MailRoute`.
+- [ ] **Step 4: Run them.** `pnpm vitest run lib entrypoints/popup`. Expected: PASS. Then `pnpm compile`.
+- [ ] **Step 5: Commit** `feat: live updates while Mailbell is open`.
+
+### Task 17: Freshness and final verification
 
 **Files:**
 - Modify: `entrypoints/popup/App.tsx`
 - Test: `entrypoints/popup/popout/MailRoute.test.tsx` (extend)
 
 **Interfaces:**
-- Consumes: `mailKeys`.
-- Behavior: on `refreshPopup`, also `queryClient.invalidateQueries({ queryKey: ['mail'] })`. Refetching keeps the previous data (`placeholderData: keepPreviousData` on the list queries), so the selection and scroll stay put. An open thread that is gone after the refetch stays shown until the user moves.
+- Consumes: `mailKeys`, `checkNow()` (Task 16).
+- Behavior: on `refreshPopup`, the popout calls `checkNow()` (Task 16), which patches the caches in place or falls back to `queryClient.invalidateQueries({ queryKey: ['mail'] })`. Refetching keeps the previous data (`placeholderData: keepPreviousData` on the list queries), so the selection and scroll stay put. An open thread that is gone after the refetch stays shown until the user moves.
 
 - [ ] **Step 1: Write the failing test:** `refreshPopup keeps the selected thread selected`. Select B, trigger the `refreshPopup` handler, and have the stubbed list return A and B with B's snippet changed → B is still selected and the new snippet shows. The reading pane never shows the empty state during the refetch: assert it is never rendered, using a MutationObserver or by polling `queryByText('No conversation selected')` across `waitFor`.
 - [ ] **Step 2: Run it.** Expected: FAIL.
