@@ -9,9 +9,9 @@ import { extractCode } from '@/lib/otp'
 import { cn } from '@/lib/utils'
 
 // Today as a time, this week as a weekday, otherwise day and month.
-function rowDate(iso: string): string {
+export function rowDate(iso: string, now: Date = new Date()): string {
   const date = dayjs(iso)
-  const days = dayjs().startOf('day').diff(date.startOf('day'), 'day')
+  const days = dayjs(now).startOf('day').diff(date.startOf('day'), 'day')
   if (days <= 0) return date.format('HH:mm')
   return date.format(days < 7 ? 'ddd' : 'D MMM')
 }
@@ -95,7 +95,7 @@ export function ThreadListRow({
             </span>
           )}
           <span className={cn('min-w-0 flex-1 truncate', unread && 'font-medium')}>
-            {sentView ? `To: ${row.to.join(', ')}` : row.from.name || row.from.email}
+            {sentView ? `To: ${row.to.join(', ') || '(no recipient)'}` : row.from.name || row.from.email}
           </span>
           {suspicious && (
             <span data-suspicious title="Suspicious sender" className="shrink-0 text-foreground/70">

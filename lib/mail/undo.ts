@@ -20,13 +20,13 @@ interface Entry {
 // actions complete independently, so the latest is whichever succeeded last.
 let latest: Entry | null = null
 
-export async function runUndoable(a: MailAction, targets: ActionTarget[]): Promise<void> {
+export async function runUndoable(a: MailAction, targets: ActionTarget[]): Promise<boolean> {
   let patch: Patch
   try {
     patch = await applyWithPatch(a, targets)
   } catch {
     toast.error(`Couldn't ${actionVerb(a)}. Try again.`)
-    return
+    return false
   }
   latest = { a, targets, patch }
   toast(ACTION_TEXT(a, targets.length), {
@@ -34,6 +34,7 @@ export async function runUndoable(a: MailAction, targets: ActionTarget[]): Promi
     duration: 6000,
     action: { label: 'Undo', onClick: () => void undoLatest() },
   })
+  return true
 }
 
 export async function undoLatest(): Promise<void> {

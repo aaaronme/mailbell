@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
-import { XIcon } from 'lucide-react'
+import { ArchiveIcon, MailCheckIcon, MailIcon, OctagonAlertIcon, Trash2Icon, XIcon } from 'lucide-react'
 import { PageTitle } from '@/components/extra/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -25,12 +25,12 @@ const CATEGORY_NAME: Record<Category, string> = {
 }
 const OPTIONAL_CATEGORIES = (['social', 'promotions', 'updates', 'forums'] as const)
 
-const BULK: { label: string; action: MailAction; removes: boolean }[] = [
-  { label: 'Archive', action: { kind: 'archive' }, removes: true },
-  { label: 'Delete', action: { kind: 'trash' }, removes: true },
-  { label: 'Spam', action: { kind: 'spam' }, removes: true },
-  { label: 'Read', action: { kind: 'read' }, removes: false },
-  { label: 'Unread', action: { kind: 'unread' }, removes: false },
+const BULK: { label: string; icon: typeof XIcon; action: MailAction; removes: boolean }[] = [
+  { label: 'Archive', icon: ArchiveIcon, action: { kind: 'archive' }, removes: true },
+  { label: 'Delete', icon: Trash2Icon, action: { kind: 'trash' }, removes: true },
+  { label: 'Spam', icon: OctagonAlertIcon, action: { kind: 'spam' }, removes: true },
+  { label: 'Read', icon: MailCheckIcon, action: { kind: 'read' }, removes: false },
+  { label: 'Unread', icon: MailIcon, action: { kind: 'unread' }, removes: false },
 ]
 
 export function ThreadList({
@@ -45,7 +45,7 @@ export function ThreadList({
   const search = route.useSearch()
   const navigate = useNavigate({ from: '/mail' })
   const { account, folder, cat, q, unread, thread } = search
-  const { rows, hasNextPage, fetchNextPage, isPending, error } = useThreadList(search)
+  const { rows, hasNextPage, fetchNextPage, isFetchingNextPage, isPending, error } = useThreadList(search)
   const labels = useLabels(account).data
   const correspondents = useCorrespondents(account)
   const knownDomains = useMemo(
@@ -58,45 +58,52 @@ export function ThreadList({
   // The selection belongs to the list it was made in.
   const latest = useRef({ checked, onCheckedChange })
   latest.current = { checked, onCheckedChange }
-  const lastChecked = useRef<number | null>(null)
+  // The url of the row last toggled; indexes go stale as pages arrive.
+  const anchor = useRef<string | null>(null)
   useEffect(() => {
-    lastChecked.current = null
+    anchor.current = null
     if (latest.current.checked.size) latest.current.onCheckedChange(new Set())
   }, [account, folder, q, cat, unread])
 
   const sentinel = useRef<HTMLDivElement>(null)
   const next = useRef(fetchNextPage)
   next.current = fetchNextPage
-  // Re-observed after every page: a sentinel that stays in view fires nothing more.
+  // Re-armed whenever a page finishes: a sentinel that stays in view fires nothing more.
   useEffect(() => {
     const el = sentinel.current
-    if (!el || !hasNextPage) return
+    if (!el || !hasNextPage || isFetchingNextPage) return
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((it) => it.isIntersecting)) next.current()
     })
     observer.observe(el)
     return () => observer.disconnect()
-  }, [hasNextPage, rows.length])
+  }, [hasNextPage, isFetchingNextPage, rows.length])
 
   const [draft, setDraft] = useState(q ?? '')
   useEffect(() => setDraft(q ?? ''), [q])
 
+  // Rows that have left the list (a refetch, an action elsewhere) no longer count.
+  const targets: ThreadRow[] = rows.filter((it) => checked.has(it.url))
+  useEffect(() => {
+    if (!isPending && targets.length !== checked.size) onCheckedChange(new Set(targets.map((it) => it.url)))
+  })
+
   const toggle = (index: number, shift: boolean) => {
     const url = rows[index]!.url
     const out = new Set(checked)
-    if (shift && lastChecked.current !== null) {
-      const [from, to] = [lastChecked.current, index].sort((a, b) => a - b)
-      rows.slice(from, to! + 1).forEach((it) => out.add(it.url))
+    const from = anchor.current === null || !checked.size ? -1 : rows.findIndex((it) => it.url === anchor.current)
+    if (shift && from >= 0) {
+      const [lo, hi] = [from, index].sort((a, b) => a - b)
+      rows.slice(lo, hi! + 1).forEach((it) => out.add(it.url))
     } else if (out.has(url)) out.delete(url)
     else out.add(url)
-    lastChecked.current = index
+    anchor.current = url
     onCheckedChange(out)
   }
 
-  const runBulk = (action: MailAction, removes: boolean) => {
-    const targets: ThreadRow[] = rows.filter((it) => checked.has(it.url))
-    void runUndoable(action, targets)
-    if (removes) onCheckedChange(new Set())
+  const runBulk = async (action: MailAction, removes: boolean) => {
+    const ok = await runUndoable(action, targets)
+    if (ok && removes) onCheckedChange(new Set())
   }
 
   const showTabs =
@@ -110,12 +117,19 @@ export function ThreadList({
 
   return (
     <div data-testid="thread-list" className="flex min-h-0 flex-1 flex-col">
-      {checked.size > 0 ? (
+      {targets.length > 0 ? (
         <div className="flex h-12 shrink-0 items-center gap-1 border-b border-foreground/10 px-2">
-          <span className="min-w-0 flex-1 truncate px-2 text-sm">{checked.size} selected</span>
+          <span className="min-w-0 flex-1 truncate px-2 text-sm">{targets.length} selected</span>
           {BULK.map((it) => (
-            <Button key={it.label} variant="ghost" size="sm" onClick={() => runBulk(it.action, it.removes)}>
-              {it.label}
+            <Button
+              key={it.label}
+              variant="ghost"
+              size="icon"
+              title={it.label}
+              aria-label={it.label}
+              onClick={() => void runBulk(it.action, it.removes)}
+            >
+              <it.icon />
             </Button>
           ))}
           <Button variant="ghost" size="sm" onClick={() => onCheckedChange(new Set())}>
@@ -139,7 +153,7 @@ export function ThreadList({
                 onClick={() => setSearch({ unread: it.label === 'Unread' ? true : undefined })}
                 className={cn(
                   'h-7 cursor-pointer px-2.5 transition-colors',
-                  it.on ? 'bg-foreground text-background' : 'text-foreground/70 hover:bg-foreground/5 hover:text-foreground',
+                  it.on ? 'bg-foreground/10 text-foreground' : 'text-foreground/70 hover:bg-foreground/5 hover:text-foreground',
                 )}
               >
                 {it.label}
@@ -152,13 +166,12 @@ export function ThreadList({
         <Input
           ref={searchRef}
           type="search"
-          role="searchbox"
           aria-label="Search mail"
           placeholder="Search"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key !== 'Enter') return
+            if (e.key !== 'Enter' || e.nativeEvent.isComposing) return
             const value = draft.trim()
             void setSearch({ q: value || undefined })
           }}
@@ -214,7 +227,7 @@ export function ThreadList({
             row={row}
             selected={row.url === thread}
             checked={checked.has(row.url)}
-            anyChecked={checked.size > 0}
+            anyChecked={targets.length > 0}
             showAccount={account === 'all'}
             folder={folder}
             knownDomains={knownDomains}

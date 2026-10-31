@@ -52,6 +52,12 @@ describe('undo', () => {
     )
   })
 
+  it('resolves true on success and false when it rolled back', async () => {
+    expect(await undo.runUndoable({ kind: 'archive' }, [target('A')])).toBe(true)
+    fetchMock.mockResolvedValue(new Response('no', { status: 500 }))
+    expect(await undo.runUndoable({ kind: 'archive' }, [target('A')])).toBe(false)
+  })
+
   it('offers no undo after a failed action', async () => {
     fetchMock.mockResolvedValue(new Response('no', { status: 500 }))
     await undo.runUndoable({ kind: 'archive' }, [target('A')])

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAccessToken } from '../auth/oauth'
 import { setTokenSource, type GmailMessage } from './gmail'
-import { listThreadPage, modifyThreads } from './mailbox'
+import { decodeEntities, listThreadPage, modifyThreads } from './mailbox'
 
 function msg(id: string, date: number, from: string, labels: string[], contentType: string): GmailMessage {
   return {
@@ -68,5 +68,16 @@ describe('mailbox api', () => {
     for (const [, init] of posts) {
       expect(JSON.parse(init.body)).toEqual({ addLabelIds: ['INBOX'], removeLabelIds: [] })
     }
+  })
+})
+
+describe('decodeEntities', () => {
+  it('decodes numeric and named entities', () => {
+    expect(decodeEntities('It&#39;s &amp; &#x41; &lt;b&gt; &quot;q&quot; &apos;x&apos;&nbsp;y &#8211;')).toBe(
+      'It\'s & A <b> "q" \'x\'\u00a0y \u2013',
+    )
+  })
+  it('leaves unknown or malformed entities and does not double-decode', () => {
+    expect(decodeEntities('&bogus; &#xZZ; &amp;lt;')).toBe('&bogus; &#xZZ; &lt;')
   })
 })

@@ -30,11 +30,12 @@ export interface ThreadListResult {
   rows: ThreadRow[]
   hasNextPage: boolean
   fetchNextPage(): void
+  isFetchingNextPage: boolean
   isPending: boolean
   error: unknown
 }
 
-const NO_ROWS: ThreadListResult = { rows: [], hasNextPage: false, fetchNextPage: () => {}, isPending: false, error: null }
+const NO_ROWS: ThreadListResult = { rows: [], hasNextPage: false, fetchNextPage: () => {}, isFetchingNextPage: false, isPending: false, error: null }
 
 export function useThreadList(search: MailSearch): ThreadListResult {
   const { account, folder, cat, q, unread } = search
@@ -53,6 +54,7 @@ export function useThreadList(search: MailSearch): ThreadListResult {
     rows,
     hasNextPage: result.hasNextPage,
     fetchNextPage: () => void result.fetchNextPage(),
+    isFetchingNextPage: result.isFetchingNextPage,
     isPending: result.isPending,
     error: result.error,
   }
