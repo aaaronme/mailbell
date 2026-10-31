@@ -44,6 +44,7 @@ const belongs = (messageLabels: string[][], query: ListQuery) =>
   messageLabels.some(
     (labels) =>
       query.labelIds.every((it) => labels.includes(it)) &&
+      !query.excludeLabelIds?.some((it) => labels.includes(it)) &&
       (query.includeSpamTrash || !labels.some((it) => TRASH_SPAM.includes(it))),
   )
 

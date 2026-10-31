@@ -11,6 +11,15 @@ describe('listQuery', () => {
       includeSpamTrash: false,
     })
   })
+  // Gmail's Primary is the inbox minus the other categories: much of it
+  // carries no CATEGORY_PERSONAL label.
+  it('makes Primary the inbox without the other categories', () => {
+    expect(listQuery('INBOX', { category: 'primary' })).toEqual({
+      labelIds: ['INBOX'],
+      excludeLabelIds: ['CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS', 'CATEGORY_UPDATES', 'CATEGORY_FORUMS'],
+      includeSpamTrash: false,
+    })
+  })
   it('includes spam and trash for their own folders', () => {
     expect(listQuery('TRASH', {})).toEqual({ labelIds: ['TRASH'], includeSpamTrash: true })
   })

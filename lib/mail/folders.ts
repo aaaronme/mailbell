@@ -28,12 +28,20 @@ export const CATEGORY_LABEL: Record<Category, string> = {
 export function listQuery(
   folder: string,
   opts: { category?: Category; q?: string; unread?: boolean },
-): { labelIds: string[]; q?: string; includeSpamTrash: boolean } {
+): { labelIds: string[]; excludeLabelIds?: string[]; q?: string; includeSpamTrash: boolean } {
   if (opts.q) return { labelIds: [], q: opts.q, includeSpamTrash: false }
   const labelIds = folder === 'ALL' ? [] : [folder]
-  if (folder === 'INBOX' && opts.category) labelIds.push(CATEGORY_LABEL[opts.category])
+  // Gmail's Primary is what no other category claimed; much of it carries no
+  // CATEGORY_PERSONAL label.
+  const primary = folder === 'INBOX' && opts.category === 'primary'
+  if (folder === 'INBOX' && opts.category && !primary) labelIds.push(CATEGORY_LABEL[opts.category])
   if (opts.unread) labelIds.push('UNREAD')
-  return { labelIds, includeSpamTrash: folder === 'SPAM' || folder === 'TRASH' }
+  const includeSpamTrash = folder === 'SPAM' || folder === 'TRASH'
+  if (!primary) return { labelIds, includeSpamTrash }
+  const excludeLabelIds = Object.entries(CATEGORY_LABEL)
+    .filter(([it]) => it !== 'primary')
+    .map(([, label]) => label)
+  return { labelIds, excludeLabelIds, includeSpamTrash }
 }
 
 export interface LabelNode {

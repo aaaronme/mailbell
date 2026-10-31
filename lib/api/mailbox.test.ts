@@ -61,6 +61,17 @@ describe('mailbox api', () => {
     expect(row.date).toBe(new Date(2000).toISOString())
   })
 
+  it('listThreadPage leaves out excluded categories', async () => {
+    await listThreadPage('me@gmail.com', {
+      labelIds: ['INBOX'],
+      excludeLabelIds: ['CATEGORY_SOCIAL', 'CATEGORY_PROMOTIONS'],
+      includeSpamTrash: false,
+    })
+    const list = new URL(fetchMock.mock.calls.find(([url]) => new URL(url).pathname.endsWith('/threads'))![0])
+    expect(list.searchParams.getAll('labelIds')).toEqual(['INBOX'])
+    expect(list.searchParams.get('q')).toBe('-category:social -category:promotions')
+  })
+
   it('modifyThreads posts each thread', async () => {
     await modifyThreads('me@gmail.com', ['a', 'b'], ['INBOX'], [])
     const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')

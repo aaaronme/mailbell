@@ -93,6 +93,8 @@ function threadToRow(account: string, thread: GmailThread): ThreadRow {
   }
 }
 
+const CATEGORY_OF = new Map(Object.entries(CATEGORY_LABEL).map(([category, label]) => [label, category]))
+
 export async function listThreadPage(
   account: string,
   query: ReturnType<typeof listQuery>,
@@ -100,7 +102,10 @@ export async function listThreadPage(
 ): Promise<{ rows: ThreadRow[]; nextPageToken?: string }> {
   const params = new URLSearchParams({ maxResults: '50' })
   query.labelIds.forEach((it) => params.append('labelIds', it))
-  if (query.q) params.set('q', query.q)
+  // labelIds can only require labels; leaving some out takes a search.
+  const excluded = query.excludeLabelIds?.map((label) => `-category:${CATEGORY_OF.get(label)}`)
+  const q = [query.q, ...(excluded ?? [])].filter(Boolean).join(' ')
+  if (q) params.set('q', q)
   if (query.includeSpamTrash) params.set('includeSpamTrash', 'true')
   if (pageToken) params.set('pageToken', pageToken)
   const list = await gmailFetch<{ threads?: { id: string }[]; nextPageToken?: string }>(

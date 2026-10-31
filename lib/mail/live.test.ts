@@ -5,6 +5,7 @@ import { setTokenSource } from '../api/gmail'
 import { debugLog } from '../debugLog'
 import { FAST_POLL_MS } from '../fastPoll'
 import type { HistoryRecord, ThreadRow } from '../api/mailbox'
+import { listQuery } from './folders'
 
 vi.mock('../debugLog', () => ({ debugLog: vi.fn(async () => undefined) }))
 vi.mock('@/lib/messager', () => ({ bgMessager: { sendMessage: vi.fn(async () => undefined) } }))
@@ -112,6 +113,17 @@ describe('live updates', () => {
       expect(ids(inboxKey())).toEqual(['C', 'A', 'B'])
       expect(rowsOf(inboxKey())[0]!.subject).toBe('Subject C')
       expect(ids(starredKey())).toEqual(['A'])
+    })
+
+    it('a new Promotions thread stays out of Primary', async () => {
+      const primaryKey = mailKeys.list(ME, 'INBOX', listQuery('INBOX', { category: 'primary' }))
+      seed(primaryKey, [row('A', ['INBOX', 'UNREAD', 'STARRED'], D30)])
+      threads.C = metadata('C', [[['INBOX', 'CATEGORY_PROMOTIONS'], D31]])
+      threads.E = metadata('E', [[['INBOX'], D31]])
+      await live.applyHistory(ME, [
+        { messagesAdded: [msg('C', ['INBOX', 'CATEGORY_PROMOTIONS']), msg('E', ['INBOX'])] },
+      ])
+      expect(ids(primaryKey)).toEqual(['E', 'A'])
     })
 
     it('a new message moves its thread to the top, replacing the old row', async () => {
