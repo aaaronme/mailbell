@@ -66,6 +66,22 @@ describe('blockCssUrls', () => {
     })
   })
 
+  it('ends a malformed unquoted url at the first ")" and resumes there', () => {
+    for (const css of [
+      'a{background:url(data:x" ); background:url(https://a/x.png) ; ")}',
+      'a{background:url(data:x( ); background:url(https://a/x.png)}',
+    ]) {
+      const result = blockCssUrls(css)
+      expect(result.css).not.toContain('https://')
+      expect(result.blocked).toBe(2)
+    }
+  })
+
+  it('keeps a local url padded with whitespace', () => {
+    const css = 'a{background:url( data:image/png;base64,AAA )}'
+    expect(blockCssUrls(css)).toEqual({ css, blocked: 0 })
+  })
+
   it('keeps data and cid urls', () => {
     const css = 'a{background:url(data:image/png;base64,AAAA)} b{background:url("cid:x")}'
     expect(blockCssUrls(css)).toEqual({ css, blocked: 0 })

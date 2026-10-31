@@ -189,9 +189,21 @@ export function blockCssUrls(css: string, mode: 'all' | 'trackers' = 'all'): { c
             j++
           }
         } else {
-          const close = skipParens(css, j)
-          value = decodeCssEscapes(css.slice(j, close - 1))
-          j = close
+          // Unquoted, the url ends at the first unescaped ")". A quote, a "("
+          // or whitespace before the end make it a bad-url token, which CSS
+          // still ends there and parses on from, so it can't hide a
+          // declaration behind a string or a nested paren.
+          let k = j
+          let malformed = false
+          while (k < css.length && css[k] !== ')') {
+            const c = css.charAt(k)
+            if (c === '"' || c === "'" || c === '(') malformed = true
+            else if (/\s/.test(c) && !/^\s*\)/.test(css.slice(k, css.indexOf(')', k) + 1 || undefined))) malformed = true
+            k += c === '\\' ? 2 : 1
+          }
+          k = Math.min(k, css.length)
+          value = malformed ? 'malformed:' : decodeCssEscapes(css.slice(j, k))
+          j = Math.min(k + 1, css.length)
         }
         if (!bad(value)) out += css.slice(i, j)
         else {

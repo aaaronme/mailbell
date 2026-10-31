@@ -132,6 +132,15 @@ describe('sanitizeStyles', () => {
     expect(blocked).toBe(3)
   })
 
+  it('resumes after a malformed unquoted url', () => {
+    const css = 'a{background:url(data:x" ); background:url(https://a/x.png) ; ")}'
+    expect(sanitizeStyles(css)).toMatchObject({ blocked: 2 })
+    expect(sanitizeStyles(css).css).not.toContain('https://')
+    const { html, blocked } = sanitizeMail(`<div style='background:url(data:x( ); background:url(https://a/x.png)'>y</div>`)
+    expect(html).not.toContain('https://')
+    expect(blocked).toBe(1)
+  })
+
   it('leaves css alone with remote', () => {
     expect(sanitizeStyles('p{background:url(https://a/b.png)}', { remote: true })).toEqual({
       css: 'p{background:url(https://a/b.png)}',
