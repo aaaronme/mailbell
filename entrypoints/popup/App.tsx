@@ -4,6 +4,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { router } from './router'
 import { bgMessager, popupMessager } from '@/lib/messager'
 import { mailQueryKey } from '@/lib/useMailQuery'
+import { notifyRefreshPopup } from '@/lib/mail/live'
 import { queryClient } from '@/lib/queryClient'
 import { useEffectOnce } from '@/lib/utils/useEffectOnce'
 
@@ -21,6 +22,7 @@ function AppContent() {
     // sit on stale data until it fires.
     const removeRefresh = popupMessager.onMessage('refreshPopup', () => {
       queryClient.invalidateQueries({ queryKey: mailQueryKey })
+      notifyRefreshPopup()
     })
     // An ordinary poll: the refresh button is what re-reads every thread.
     bgMessager.sendMessage('poll', undefined).catch((err) => console.error('poll failed', err))

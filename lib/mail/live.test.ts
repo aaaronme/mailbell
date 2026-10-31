@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getAccessToken } from '../auth/oauth'
+import { renderHook } from 'vitest-browser-react'
+import { getAccessToken, OAuthError } from '../auth/oauth'
 import { setTokenSource } from '../api/gmail'
+import { FAST_POLL_MS } from '../fastPoll'
 import type { HistoryRecord, ThreadRow } from '../api/mailbox'
 
+vi.mock('../debugLog', () => ({ debugLog: vi.fn(async () => undefined) }))
 vi.mock('@/lib/messager', () => ({ bgMessager: { sendMessage: vi.fn(async () => undefined) } }))
 
 const ME = 'me@gmail.com'
@@ -334,6 +337,67 @@ describe('live updates', () => {
       const { checkNow } = live.createLiveChecker(() => [ME])
       await Promise.all([checkNow(), checkNow(), checkNow()])
       expect(calls('/profile')).toHaveLength(2)
+    })
+  })
+  describe('useLiveUpdates', () => {
+    const profileCalls = () => fetchMock.mock.calls.filter((c) => String(c[0]).includes('/profile')).length
+    const visibility = (state: DocumentVisibilityState) =>
+      vi.spyOn(document, 'visibilityState', 'get').mockReturnValue(state)
+    const settled = () => vi.waitFor(() => expect(profileCalls()).toBeGreaterThan(0))
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+      fetchMock.mockImplementation(async () => Response.json({ historyId: '100' }))
+    })
+    afterEach(() => vi.useRealTimers())
+
+    it('checks on the interval only while the document is visible', async () => {
+      visibility('visible')
+      await renderHook(() => live.useLiveUpdates([ME]))
+      await settled()
+      const seeded = profileCalls()
+      vi.advanceTimersByTime(FAST_POLL_MS)
+      await vi.waitFor(() => expect(profileCalls()).toBe(seeded + 1))
+      visibility('hidden')
+      vi.advanceTimersByTime(FAST_POLL_MS * 3)
+      await new Promise((r) => setTimeout(r, 50))
+      expect(profileCalls()).toBe(seeded + 1)
+    })
+
+    it('checks when the window gains focus', async () => {
+      visibility('visible')
+      await renderHook(() => live.useLiveUpdates([ME]))
+      await settled()
+      const seeded = profileCalls()
+      window.dispatchEvent(new Event('focus'))
+      await vi.waitFor(() => expect(profileCalls()).toBe(seeded + 1))
+    })
+
+    it('stops the interval and the focus listener on unmount', async () => {
+      visibility('visible')
+      const view = await renderHook(() => live.useLiveUpdates([ME]))
+      await settled()
+      view.unmount()
+      const before = profileCalls()
+      vi.advanceTimersByTime(FAST_POLL_MS * 3)
+      window.dispatchEvent(new Event('focus'))
+      await new Promise((r) => setTimeout(r, 50))
+      expect(profileCalls()).toBe(before)
+    })
+
+    it('stays silent for a signed-out account', async () => {
+      const { toast } = await import('sonner')
+      const error = vi.spyOn(toast, 'error')
+      const { debugLog } = await import('../debugLog')
+      setTokenSource(async () => {
+        throw new OAuthError('invalid_grant')
+      })
+      visibility('visible')
+      await renderHook(() => live.useLiveUpdates([ME]))
+      await new Promise((r) => setTimeout(r, 50))
+      expect(error).not.toHaveBeenCalled()
+      expect(debugLog).not.toHaveBeenCalled()
+      expect(profileCalls()).toBe(0)
     })
   })
 })

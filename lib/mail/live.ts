@@ -222,6 +222,15 @@ export function createLiveChecker(accounts: () => string[]) {
   return { checkNow }
 }
 
+// @webext-core/messaging allows one 'refreshPopup' listener per page, and
+// App.tsx owns it: the popout subscribes here instead.
+const refreshHandlers = new Set<() => void>()
+export const onRefreshPopup = (handler: () => void) => {
+  refreshHandlers.add(handler)
+  return () => void refreshHandlers.delete(handler)
+}
+export const notifyRefreshPopup = () => refreshHandlers.forEach((it) => it())
+
 // While the view is visible: checks every FAST_POLL_MS and on focus. Returns
 // checkNow for callers that know something changed.
 export function useLiveUpdates(accounts: string[]): () => Promise<void> {

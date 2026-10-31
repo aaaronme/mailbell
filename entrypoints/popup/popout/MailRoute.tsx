@@ -14,7 +14,7 @@ import type { ReplyHandle } from '@/components/mail/ThreadView'
 import { useAccounts } from '@/lib/useAccounts'
 import { usePreload } from '@/lib/mail/preload'
 import { useMarkRead } from '@/lib/mail/markRead'
-import { useLiveUpdates } from '@/lib/mail/live'
+import { onRefreshPopup, useLiveUpdates } from '@/lib/mail/live'
 import { useOpenThread, useThreadList } from '@/lib/mail/queries'
 import { isSettingsChange, settingsOptions } from '@/lib/settings'
 
@@ -50,7 +50,8 @@ export function MailRoute() {
   const accounts = useAccounts().data ?? NO_ACCOUNTS
   useBootstrapCorrespondents(accounts)
   // An account waiting for Reconnect would only fail every check.
-  useLiveUpdates(accounts.filter((it) => !it.needsReauth).map((it) => it.email))
+  const checkNow = useLiveUpdates(accounts.filter((it) => !it.needsReauth).map((it) => it.email))
+  useEffect(() => onRefreshPopup(() => void checkNow()), [checkNow])
   const { rows } = useThreadList(search)
   usePreload(rows, thread)
 
