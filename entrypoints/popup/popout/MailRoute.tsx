@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import { ArrowLeftIcon, PanelLeftIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -27,6 +27,16 @@ export function MailRoute() {
   const wide = useMediaQuery('(min-width: 1000px)')
   const medium = useMediaQuery('(min-width: 700px)')
   const [drawer, setDrawer] = useState(false)
+
+  useEffect(() => {
+    if (wide) setDrawer(false)
+  }, [wide])
+  useEffect(() => {
+    if (!drawer) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setDrawer(false)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [drawer])
 
   const clearThread = () => navigate({ search: (prev) => ({ ...prev, thread: undefined }) })
 

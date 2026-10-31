@@ -1,23 +1,18 @@
 import { CATEGORY_LABEL, type Category } from '@/lib/mail/folders'
+import type { MailSearch } from '@/lib/mail/search'
 
-export interface MailSearch {
-  // An address, or 'all'.
-  account: string
-  // A SystemFolder or a label id.
-  folder: string
-  cat?: Category
-  q?: string
-  unread?: boolean
-  // A threadUrl().
-  thread?: string
+export type { MailSearch }
+
+// The router JSON-parses search values, so a pasted `?q=2024` arrives as a number.
+const str = (v: unknown) => {
+  if (typeof v === 'number') return String(v)
+  return typeof v === 'string' && v !== '' ? v : undefined
 }
-
-const str = (v: unknown) => (typeof v === 'string' && v !== '' ? v : undefined)
 
 export function validateMailSearch(raw: Record<string, unknown>): MailSearch {
   const folder = str(raw.folder) ?? 'INBOX'
-  const cat = str(raw.cat) as Category | undefined
-  const validCat = cat && cat in CATEGORY_LABEL ? cat : undefined
+  const cat = str(raw.cat)
+  const validCat = cat && Object.hasOwn(CATEGORY_LABEL, cat) ? (cat as Category) : undefined
   const out: MailSearch = {
     account: str(raw.account) ?? 'all',
     folder,

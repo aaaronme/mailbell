@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
-import { page } from 'vitest/browser'
+import { page, userEvent } from 'vitest/browser'
 import { fakeBrowser } from '@webext-core/fake-browser'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
@@ -49,6 +49,26 @@ describe('MailRoute', () => {
     await expect.element(screen.getByTestId('sidebar')).not.toBeInTheDocument()
     await screen.getByTitle('Show sidebar').click()
     await expect.element(screen.getByTestId('sidebar')).toBeInTheDocument()
+  })
+
+  it('closes the sidebar overlay on Escape', async () => {
+    await page.viewport(900, 800)
+    const { screen } = await mount('#/mail')
+    await screen.getByTitle('Show sidebar').click()
+    await expect.element(screen.getByTestId('sidebar')).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    await expect.element(screen.getByTestId('sidebar')).not.toBeInTheDocument()
+  })
+
+  it('closes the sidebar overlay when the viewport becomes wide', async () => {
+    await page.viewport(900, 800)
+    const { screen } = await mount('#/mail')
+    await screen.getByTitle('Show sidebar').click()
+    await page.viewport(1200, 800)
+    // Wide: the sidebar is inline, so the overlay is gone.
+    await vi.waitFor(() => expect(document.querySelector('.absolute [data-testid="sidebar"]')).toBeNull())
+    await page.viewport(900, 800)
+    await expect.element(screen.getByTestId('sidebar')).not.toBeInTheDocument()
   })
 
   it('is single-pane below 700px, and Back clears the thread', async () => {

@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { getOpenThread, listLabels, listThreadPage, type ThreadRow } from '../api/mailbox'
 import { parseThreadUrl } from '../api/gmail'
-import type { MailSearch } from '@/entrypoints/popup/popout/mailSearch'
+import type { MailSearch } from './search'
 import { listQuery, type Category } from './folders'
 
 // Every list key carries its folder at index 3; optimistic patching in
