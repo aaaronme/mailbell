@@ -100,9 +100,11 @@ export async function listThreadPage(
   query: ReturnType<typeof listQuery>,
   pageToken?: string,
 ): Promise<{ rows: ThreadRow[]; nextPageToken?: string }> {
-  // Each row costs its own metadata fetch, so a short first page shows mail
+  // Each row costs its own metadata fetch, so a short first page, fetched all
+  // at once (150 of the 250 quota units a user gets per second), shows mail
   // sooner; the list's sentinel asks for the next one straight after.
-  const params = new URLSearchParams({ maxResults: pageToken ? '50' : '15' })
+  const first = !pageToken
+  const params = new URLSearchParams({ maxResults: first ? '15' : '50' })
   query.labelIds.forEach((it) => params.append('labelIds', it))
   // labelIds can only require labels; leaving some out takes a search.
   const excluded = query.excludeLabelIds?.map((label) => `-category:${CATEGORY_OF.get(label)}`)
@@ -114,7 +116,8 @@ export async function listThreadPage(
     account,
     `/threads?${params}`,
   )
-  const rows = await mapLimit(list.threads ?? [], 4, ({ id }) => getThreadRow(account, id))
+  const threads = list.threads ?? []
+  const rows = await mapLimit(threads, first ? threads.length : 4, ({ id }) => getThreadRow(account, id))
   return { rows, nextPageToken: list.nextPageToken }
 }
 

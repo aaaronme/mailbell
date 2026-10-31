@@ -83,6 +83,27 @@ describe('mailbox api', () => {
     expect(sizes).toEqual(['15', '50'])
   })
 
+  it('listThreadPage fetches a first page of rows all at once, later ones 4 at a time', async () => {
+    let inFlight = 0
+    let most = 0
+    const ids = Array.from({ length: 15 }, (_, i) => ({ id: `t${i}` }))
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = new URL(url).pathname.split('/users/me')[1]!
+      if (path === '/threads') return Response.json({ threads: ids })
+      inFlight++
+      most = Math.max(most, inFlight)
+      await new Promise((r) => setTimeout(r, 5))
+      inFlight--
+      return Response.json({ id: path.slice(9), messages: [msg('m', 1, 'a@x.com', ['INBOX'], 'text/plain')] })
+    })
+    const query = { labelIds: ['INBOX'], includeSpamTrash: false }
+    await listThreadPage('me@gmail.com', query)
+    expect(most).toBe(15)
+    most = 0
+    await listThreadPage('me@gmail.com', query, 'next')
+    expect(most).toBe(4)
+  })
+
   it('modifyThreads posts each thread', async () => {
     await modifyThreads('me@gmail.com', ['a', 'b'], ['INBOX'], [])
     const posts = fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST')
