@@ -199,7 +199,7 @@ function LabelRow({
             aria-expanded={expanded}
             onClick={() => setExpanded(!expanded)}
             style={{ left: depth * 12 }}
-            className="absolute z-10 flex h-8 w-3 cursor-pointer items-center justify-center text-foreground/40 transition-colors hover:text-foreground"
+            className={cn('absolute z-10 flex h-8 w-3 cursor-pointer items-center justify-center transition-colors', active ? 'text-background/70 hover:text-background' : 'text-foreground/40 hover:text-foreground')}
           >
             {expanded ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
           </button>
