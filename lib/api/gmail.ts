@@ -141,6 +141,22 @@ export function setTokenSource(source: TokenSource): void {
   tokenSource = source
 }
 
+const RETRY_DEFAULT_MS = 2000
+const RETRY_MAX_MS = 10_000
+
+// Gmail answers a burst with 429, or with 403 and a rate-limit reason.
+async function isRateLimited(resp: Response): Promise<boolean> {
+  if (resp.status === 429) return true
+  if (resp.status !== 403) return false
+  const text = await resp.clone().text().catch(() => '')
+  return /"(user)?rateLimitExceeded"/i.test(text)
+}
+
+function retryDelay(resp: Response): number {
+  const seconds = Number(resp.headers.get('Retry-After') ?? NaN)
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.min(seconds * 1000, RETRY_MAX_MS) : RETRY_DEFAULT_MS
+}
+
 export async function gmailFetch<T>(account: string, path: string, init: RequestInit = {}): Promise<T> {
   const send = async (token: string) =>
     fetch(`${API}${path}`, {
@@ -158,6 +174,11 @@ export async function gmailFetch<T>(account: string, path: string, init: Request
   if (resp.status === 401) {
     const stored = await tokenSource(account)
     resp = await send(stored !== token ? stored : await tokenSource(account, true))
+  }
+  // Once: a quota that is still out after the wait is the caller's to report.
+  if (await isRateLimited(resp)) {
+    await new Promise((r) => setTimeout(r, retryDelay(resp)))
+    resp = await send(await tokenSource(account))
   }
   if (!resp.ok) {
     const text = await resp.text().catch(() => '')

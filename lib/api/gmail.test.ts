@@ -335,6 +335,75 @@ describe('token source', () => {
     expect((fetchMock.mock.calls[0] as any)[1].headers.Authorization).toBe('Bearer T1')
   })
 
+  describe('rate limits', () => {
+    beforeEach(() => {
+      setTokenSource(async () => 'T1')
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    })
+    afterEach(() => vi.useRealTimers())
+
+    const limited = (status: number, headers: Record<string, string> = {}, reason = 'rateLimitExceeded') =>
+      Response.json({ error: { code: status, errors: [{ domain: 'usageLimits', reason }] } }, { status, headers })
+
+    // Reading a 403's body is a real task, so the wait starts only after it.
+    const scheduled = async () => {
+      while (!vi.getTimerCount()) await new Promise((r) => requestAnimationFrame(r))
+    }
+    // The call's outcome after running the timers for `ms`.
+    const settle = async (promise: Promise<unknown>, ms: number) => {
+      const out = promise.then(
+        (v) => ({ v }),
+        (e: unknown) => ({ e }),
+      )
+      await vi.advanceTimersByTimeAsync(ms)
+      return out
+    }
+
+    it('retries a 429 once after Retry-After seconds', async () => {
+      const fetchMock = vi.fn().mockResolvedValueOnce(limited(429, { 'Retry-After': '3' })).mockResolvedValueOnce(Response.json({ ok: 1 }))
+      vi.stubGlobal('fetch', fetchMock)
+      const done = gmailFetch('a@x', '/labels')
+      await scheduled()
+      await vi.advanceTimersByTimeAsync(2900)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(await settle(done, 200)).toEqual({ v: { ok: 1 } })
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('waits 2 s without Retry-After, and at most 10 s with a long one', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(limited(403, {}, 'userRateLimitExceeded'))
+        .mockResolvedValueOnce(Response.json({}))
+        .mockResolvedValueOnce(limited(429, { 'Retry-After': '120' }))
+        .mockResolvedValueOnce(Response.json({}))
+      vi.stubGlobal('fetch', fetchMock)
+      const first = gmailFetch('a@x', '/labels')
+      await scheduled()
+      await vi.advanceTimersByTimeAsync(1900)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(await settle(first, 200)).toEqual({ v: {} })
+      const second = gmailFetch('a@x', '/labels')
+      await scheduled()
+      await vi.advanceTimersByTimeAsync(9900)
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+      expect(await settle(second, 200)).toEqual({ v: {} })
+    })
+
+    it('throws when the retry is limited too, and never retries other 403s', async () => {
+      const fetchMock = vi.fn(async () => limited(429))
+      vi.stubGlobal('fetch', fetchMock)
+      const call = gmailFetch('a@x', '/labels')
+      await scheduled()
+      const out = await settle(call, 5000)
+      expect(String((out as { e: unknown }).e)).toContain('429')
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      const forbidden = vi.fn(async () => limited(403, {}, 'insufficientPermissions'))
+      vi.stubGlobal('fetch', forbidden)
+      await expect(gmailFetch('a@x', '/labels')).rejects.toThrow('403')
+      expect(forbidden).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it('on 401 asks the source again, forcing only if unchanged', async () => {
     const tokens = ['T1', 'T1', 'T2']
     const source = vi.fn(async (_a: string, _f?: boolean) => tokens.shift()!)

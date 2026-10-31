@@ -18,12 +18,17 @@ export const mailKeys = {
   thread: (account: string, threadId: string) => ['mail', 'thread', account, threadId] as const,
 }
 
+// Live updates keep these fresh; a refetch on every tab focus would re-list
+// each loaded page (a metadata GET per row) for nothing.
+const LIVE = { refetchOnWindowFocus: false } as const
+
 export const labelsOptions = (account: string) =>
   queryOptions({
     queryKey: mailKeys.labels(account),
     queryFn: () => listLabels(account),
     enabled: account !== 'all',
     staleTime: 60_000,
+    ...LIVE,
   })
 
 export const useLabels = (account: string) => useQuery(labelsOptions(account))
@@ -115,6 +120,7 @@ function useAllInboxes(search: MailSearch, enabled: boolean): ThreadListResult {
     },
     select,
     enabled: enabled && accountsQuery.isSuccess,
+    ...LIVE,
   })
   return {
     rows: result.data ?? NO_LIST,
@@ -139,6 +145,7 @@ export function useThreadList(search: MailSearch): ThreadListResult {
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextPageToken,
     enabled: account !== 'all',
+    ...LIVE,
   })
   const rows = useMemo(() => result.data?.pages.flatMap((it) => it.rows) ?? [], [result.data])
   if (account === 'all') return all
@@ -161,6 +168,7 @@ export const threadOptions = (url?: string) => {
     queryFn: () => getOpenThread(parsed!.account, parsed!.threadId),
     enabled: !!parsed,
     staleTime: 60_000,
+    ...LIVE,
   })
 }
 

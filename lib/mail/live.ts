@@ -21,6 +21,10 @@ import { mailKeys } from './queries'
 // Past this, refetching is cheaper than replaying.
 const MAX_RECORDS = 50
 
+// Counts cost a labels.get per label, so a busy account refreshes them at
+// most this often, with a trailing refresh for what changed in between.
+const LABELS_EVERY_MS = 30_000
+
 const TRASH_SPAM = ['TRASH', 'SPAM']
 
 type ListQuery = ReturnType<typeof listQuery>
@@ -183,6 +187,22 @@ export function createLiveChecker(accounts: () => string[]) {
   const lastHistoryId = new Map<string, string>()
   let running: Promise<void> | undefined
   let queued: Promise<void> | undefined
+  const labelsAt = new Map<string, number>()
+  const labelsTimer = new Map<string, ReturnType<typeof setTimeout>>()
+  // The last failure logged per account; the same one again isn't news.
+  const failed = new Map<string, string>()
+
+  function refreshLabels(account: string) {
+    if (labelsTimer.has(account)) return
+    const refresh = () => {
+      labelsTimer.delete(account)
+      labelsAt.set(account, Date.now())
+      void queryClient.invalidateQueries({ queryKey: mailKeys.labels(account) })
+    }
+    const wait = (labelsAt.get(account) ?? -Infinity) + LABELS_EVERY_MS - Date.now()
+    if (wait <= 0) refresh()
+    else labelsTimer.set(account, setTimeout(refresh, wait))
+  }
 
   async function check(account: string) {
     const { historyId } = await getProfile(account)
@@ -194,7 +214,7 @@ export function createLiveChecker(accounts: () => string[]) {
     const history = await listHistory(account, last)
     const outcome = history === 'expired' ? 'reload' : await applyHistory(account, history.history)
     if (outcome === 'reload') void queryClient.invalidateQueries({ predicate: ofAccount(account) })
-    void queryClient.invalidateQueries({ queryKey: mailKeys.labels(account) })
+    refreshLabels(account)
     lastHistoryId.set(account, history === 'expired' ? historyId : history.historyId)
   }
 
@@ -208,11 +228,16 @@ export function createLiveChecker(accounts: () => string[]) {
     }
     running = Promise.all(
       accounts().map((account) =>
-        check(account).catch(async (err) => {
-          // A signed-out account waits for Reconnect; anything else for the
-          // next check.
-          if (!(err instanceof OAuthError)) await debugLog('live update failed', account, err)
-        }),
+        check(account).then(
+          () => void failed.delete(account),
+          async (err) => {
+            // A signed-out account waits for Reconnect; anything else for the
+            // next check. Offline, that is the same error every few seconds.
+            if (err instanceof OAuthError || failed.get(account) === String(err)) return
+            failed.set(account, String(err))
+            await debugLog('live update failed', account, err)
+          },
+        ),
       ),
     ).then(() => {
       running = undefined

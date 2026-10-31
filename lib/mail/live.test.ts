@@ -334,6 +334,52 @@ describe('live updates', () => {
       expect(calls('/history')).toHaveLength(1)
     })
 
+    it('refreshes an account\'s counts at most every 30 s, catching up after', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+      try {
+        const { checkNow } = live.createLiveChecker(() => [ME])
+        const counts = () => queryClient.getQueryState(mailKeys.labels(ME))!.isInvalidated
+        queryClient.setQueryData(mailKeys.labels(ME), [])
+        await checkNow()
+        profileId = '105'
+        await checkNow()
+        expect(counts()).toBe(true)
+        queryClient.setQueryData(mailKeys.labels(ME), [])
+        vi.advanceTimersByTime(5_000)
+        profileId = '110'
+        await checkNow()
+        profileId = '115'
+        await checkNow()
+        expect(counts()).toBe(false)
+        vi.advanceTimersByTime(24_000)
+        expect(counts()).toBe(false)
+        vi.advanceTimersByTime(1_000)
+        expect(counts()).toBe(true)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('logs a repeated failure once until the account succeeds again', async () => {
+      vi.mocked(debugLog).mockClear()
+      const { checkNow } = live.createLiveChecker(() => [ME])
+      const ok = fetchMock.getMockImplementation()!
+      fetchMock.mockImplementation(async () => {
+        throw new TypeError('Failed to fetch')
+      })
+      await checkNow()
+      await checkNow()
+      await checkNow()
+      expect(debugLog).toHaveBeenCalledTimes(1)
+      fetchMock.mockImplementation(ok)
+      await checkNow()
+      fetchMock.mockImplementation(async () => {
+        throw new TypeError('Failed to fetch')
+      })
+      await checkNow()
+      expect(debugLog).toHaveBeenCalledTimes(2)
+    })
+
     it('runs once more after a run that calls arrived during, not once per call', async () => {
       const { checkNow } = live.createLiveChecker(() => [ME])
       await Promise.all([checkNow(), checkNow(), checkNow()])

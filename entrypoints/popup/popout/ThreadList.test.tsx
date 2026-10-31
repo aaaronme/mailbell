@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render } from 'vitest-browser-react'
 import { page, userEvent } from 'vitest/browser'
 import { fakeBrowser } from '@webext-core/fake-browser'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
 
 vi.stubGlobal('browser', fakeBrowser)
@@ -117,6 +117,21 @@ describe('ThreadList', () => {
     await vi.waitFor(() => expect(rows()).toHaveLength(50))
     document.querySelector('[data-testid="thread-sentinel"]')!.scrollIntoView()
     await vi.waitFor(() => expect(rows()).toHaveLength(60))
+  })
+
+  it('leaves freshness to live updates: focusing the tab refetches nothing', async () => {
+    const calls = () => vi.mocked(fetch).mock.calls.length
+    await mount(`account=${A}&folder=INBOX&thread=${encodeURIComponent(`https://mail.google.com/mail/?authuser=${encodeURIComponent(A)}#inbox/t1`)}&cat=primary`)
+    await vi.waitFor(() => expect(rows()).toHaveLength(50))
+    await new Promise((r) => setTimeout(r, 300))
+    const before = calls()
+    const lists = listRequests.length
+    focusManager.setFocused(false)
+    focusManager.setFocused(true)
+    await new Promise((r) => setTimeout(r, 300))
+    focusManager.setFocused(undefined)
+    expect(listRequests.length).toBe(lists)
+    expect(calls()).toBe(before)
   })
 
   it('unread switch', async () => {
