@@ -43,8 +43,8 @@ const headerOf = (headers: Headers, name: string) =>
 // text a sender or relay controls ("(domain of dmarc=pass@evil.com ...)",
 // smtp.mailfrom="x; dmarc=pass"@evil.com), so neither may read as structure.
 // Nested comments and backslash escapes are honoured; an unterminated one
-// swallows the rest, which can only lose information.
-function stripQuotedAndComments(value: string): string {
+// swallows the rest, and is reported so callers can fail closed.
+function stripQuotedAndComments(value: string): { text: string; balanced: boolean } {
   let out = ''
   let depth = 0
   let quoted = false
@@ -61,7 +61,7 @@ function stripQuotedAndComments(value: string): string {
     else if (c === '(') depth = 1
     else out += c
   }
-  return out
+  return { text: out, balanced: depth === 0 && !quoted }
 }
 
 interface Segment {
@@ -81,8 +81,10 @@ function property(segment: Segment, key: string): string | undefined {
 function authResult(headers: Headers) {
   const value = headerOf(headers, 'Authentication-Results')
   if (value === undefined) return undefined
-  const [authserv = '', ...rest] = stripQuotedAndComments(value).split(';')
+  const scanned = stripQuotedAndComments(value)
+  const [authserv = '', ...rest] = scanned.text.split(';')
   if (authserv.trim().split(/\s+/)[0]?.toLowerCase() !== 'mx.google.com') return undefined
+  if (!scanned.balanced) return { unreadable: true as const }
   const segments: Segment[] = []
   for (const text of rest) {
     const m = text.match(/^\s*([a-z][a-z0-9-]*)\s*=\s*([a-z]+)/i)
@@ -102,31 +104,40 @@ function authResult(headers: Headers) {
 
 // The addr-specs of an address header, in order. Display names and comments
 // are dropped first, so an address written inside one never counts.
-function addressList(value: string): string[] {
-  return stripQuotedAndComments(value)
+function addressList(value: string): { addresses: string[]; balanced: boolean } {
+  const { text, balanced } = stripQuotedAndComments(value)
+  const addresses = text
     .split(/,(?![^<]*>)/)
     .map((part) => (part.match(/<([^>]*)>/)?.[1] ?? part).trim())
     .filter(Boolean)
+  return { addresses, balanced }
 }
 
 export function senderIdentity(headers: Headers, fromEmail: string): SenderIdentity {
   const fromDomain = splitAddress(fromEmail).domain
   const auth = authResult(headers)
 
-  const signedBy = auth?.dkim.find(Boolean)?.replace(/^.*@/, '').toLowerCase()
+  const dkimDomains: (string | undefined)[] = (auth && 'dkim' in auth && auth.dkim) || []
+  const signedBy = dkimDomains.find(Boolean)?.replace(/^.*@/, '').toLowerCase()
   const returnPath = headerOf(headers, 'Return-Path')?.replace(/[<>\s]/g, '')
   // Gmail's own hop: Received headers above it are internal, those below it
   // are the sender's to write.
-  const received = headers.find(
-    (h) => h.name.toLowerCase() === 'received' && /\bby\s+mx\.google\.com\b/i.test(h.value),
-  )?.value
-  const replyTos = addressList(headerOf(headers, 'Reply-To') ?? '')
+  const gmailHop = /\bby\s+mx\.google\.com(?=[\s;(]|$)/i
+  const received = headers.find((h) => h.name.toLowerCase() === 'received' && gmailHop.test(h.value))?.value
+  const afterHost = received?.slice(received.search(gmailHop) + received.match(gmailHop)![0].length)
+  const rawReplyTo = headerOf(headers, 'Reply-To')?.trim()
+  const replyTos = addressList(rawReplyTo ?? '')
+  // A Reply-To that can't be read is not one that is safe.
+  const replyToUnreadable = !!rawReplyTo && (!replyTos.balanced || !replyTos.addresses.length)
 
   let status: AuthStatus
   let reason: string | undefined
   if (!auth) {
     status = 'unverified'
     reason = 'Not checked by Gmail'
+  } else if ('unreadable' in auth) {
+    status = 'failed'
+    reason = 'Authentication results could not be read'
   } else if (auth.failed) {
     status = 'failed'
   } else if (auth.dmarc !== 'pass') {
@@ -152,8 +163,8 @@ export function senderIdentity(headers: Headers, fromEmail: string): SenderIdent
     signedBy,
     mailedBy: returnPath ? registrableDomain(returnPath) : undefined,
     via: signer && signer !== fromDomain ? signer : undefined,
-    tls: received === undefined ? undefined : /ESMTPS|version=TLS/i.test(received),
-    replyTo: replyTos[0],
-    replyToMismatch: replyTos.some((a) => registrableDomain(a) !== fromDomain),
+    tls: afterHost === undefined ? undefined : /\bwith\s+ESMTPS|\(version=TLS/i.test(afterHost),
+    replyTo: replyToUnreadable ? rawReplyTo : replyTos.addresses[0],
+    replyToMismatch: replyToUnreadable || replyTos.addresses.some((a) => registrableDomain(a) !== fromDomain),
   }
 }

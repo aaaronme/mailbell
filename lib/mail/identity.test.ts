@@ -92,7 +92,17 @@ describe('senderIdentity', () => {
       [auth('mx.google.com; dkim=pass header.d=evil.com; spf=pass smtp.mailfrom="x; dmarc=pass header.from=victim.com')],
       'ceo@victim.com',
     )
-    expect(open.status).toBe('unverified')
+    expect(open.status).toBe('failed')
+  })
+
+  it('fails when the results cannot be read', () => {
+    const id = senderIdentity(
+      [auth('mx.google.com; spf=pass (google.com: domain of "(x"@evil.com designates 1.2.3.4) smtp.mailfrom="(x"@evil.com; dmarc=fail header.from=evil.com')],
+      'x@evil.com',
+    )
+    expect(id).toMatchObject({ status: 'failed', reason: 'Authentication results could not be read' })
+    const unclosed = senderIdentity([auth('mx.google.com; dkim=pass (header.d=a.com; dmarc=pass header.from=a.com')], 'x@a.com')
+    expect(unclosed.status).toBe('failed')
   })
 
   it('normalises signedBy', () => {
@@ -102,7 +112,7 @@ describe('senderIdentity', () => {
 
   it('handles nested comments and quoted strings', () => {
     const id = senderIdentity(
-      [auth('mx.google.com; dkim=pass (a (b dmarc=pass) c) header.d=a.com; dmarc=fail (")") header.from=a.com')],
+      [auth('mx.google.com; dkim=pass (a (b dmarc=pass) c) header.d=a.com; dmarc=fail (a \\) "b") header.from=a.com')],
       'x@a.com',
     )
     expect(id.status).toBe('failed')
@@ -189,6 +199,15 @@ describe('senderIdentity', () => {
     expect(senderIdentity(hops('from mail.x.com by MX.GOOGLE.COM with SMTP id q1'), 'x@a.com').tls).toBe(false)
   })
 
+  it('anchors the Gmail hop host and reads TLS only after it', () => {
+    const tlsOf = (value: string) => senderIdentity([{ name: 'Received', value }], 'x@a.com').tls
+    expect(tlsOf('from ESMTPS (helo) by mx.google.com with SMTP id 1')).toBe(false)
+    expect(tlsOf('from x by mx.google.com.evil.com with ESMTPS id 1')).toBeUndefined()
+    expect(tlsOf('from x by mx.google.com with ESMTPS id 1')).toBe(true)
+    expect(tlsOf('from x by mx.google.com with SMTP id 1 (version=TLS1_3)')).toBe(true)
+    expect(tlsOf('from x by mx.google.com (Postfix) with ESMTPS id 1 (version=TLS1_3)')).toBe(true)
+  })
+
   it('replyToMismatch when registrable domains differ', () => {
     const id = senderIdentity([{ name: 'Reply-To', value: 'x@gmail.com' }], 'ceo@corp.com')
     expect(id.replyTo).toBe('x@gmail.com')
@@ -198,6 +217,12 @@ describe('senderIdentity', () => {
       expect(spoof.replyToMismatch, value).toBe(true)
       expect(spoof.replyTo, value).toBe('x@evil.com')
     }
+    const broken = senderIdentity([{ name: 'Reply-To', value: ' "oops <evil@evil.com> ' }], 'ceo@corp.com')
+    expect(broken.replyToMismatch).toBe(true)
+    expect(broken.replyTo).toBe('"oops <evil@evil.com>')
+    const unparsed = senderIdentity([{ name: 'Reply-To', value: '()' }], 'ceo@corp.com')
+    expect(unparsed.replyToMismatch).toBe(true)
+    expect(senderIdentity([], 'ceo@corp.com').replyToMismatch).toBe(false)
     const same = senderIdentity([{ name: 'Reply-To', value: 'Boss <x@mail.corp.com>' }], 'ceo@corp.com')
     expect(same.replyToMismatch).toBe(false)
   })
