@@ -38,12 +38,12 @@ export function splitAddress(email: string): { local: string; host: string; doma
 const headerOf = (headers: Headers, name: string) =>
   headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value
 
-// Removes RFC 5322 comments and quoted strings in one left-to-right pass, so a
-// "(" inside quotes or a quote inside a comment can't desync it. Both are free
-// text a sender or relay controls ("(domain of dmarc=pass@evil.com ...)",
-// smtp.mailfrom="x; dmarc=pass"@evil.com), so neither may read as structure.
-// Nested comments and backslash escapes are honoured; an unterminated one
-// swallows the rest, and is reported so callers can fail closed.
+// Removes RFC 5322 comments and quoted strings from an address header in one
+// left-to-right pass, so a "(" inside quotes or a quote inside a comment can't
+// desync it. Both are sender text ('"<ceo@corp.com>" <x@evil.com>'), so neither
+// may read as an address. Nested comments and backslash escapes are honoured;
+// an unterminated one swallows the rest, and is reported so callers can fail
+// closed.
 function stripQuotedAndComments(value: string): { text: string; balanced: boolean } {
   let out = ''
   let depth = 0
@@ -64,6 +64,26 @@ function stripQuotedAndComments(value: string): { text: string; balanced: boolea
   return { text: out, balanced: depth === 0 && !quoted }
 }
 
+// Removes RFC 5322 comments (nested, with backslash escapes). Comments are
+// free text a sender or relay controls ("(domain of dmarc=pass@evil.com ...)"),
+// so none of it may read as structure. An unterminated comment or a stray ")"
+// is reported so callers can fail closed.
+function stripComments(value: string): { text: string; balanced: boolean } {
+  let out = ''
+  let depth = 0
+  for (let i = 0; i < value.length; i++) {
+    const c = value[i]!
+    if (depth > 0) {
+      if (c === '\\') i++
+      else if (c === '(') depth++
+      else if (c === ')' && --depth === 0) out += ' '
+    } else if (c === '(') depth = 1
+    else if (c === ')') return { text: out, balanced: false }
+    else out += c
+  }
+  return { text: out, balanced: depth === 0 }
+}
+
 interface Segment {
   method: string
   result: string
@@ -78,13 +98,17 @@ function property(segment: Segment, key: string): string | undefined {
 // Gmail's verdict: the message's first Authentication-Results header, and only
 // when it names mx.google.com. Any later header, or one a sender or an earlier
 // hop added on top, says nothing about what Gmail checked.
+// Any '"' makes it unreadable: inside Gmail's comments quotes aren't special,
+// so a quoted local part can carry ")" or ";" out of one. Unquoted local parts
+// are atext, which has none of ( ) ; ", so without quotes a sender can't
+// write structure.
 function authResult(headers: Headers) {
   const value = headerOf(headers, 'Authentication-Results')
   if (value === undefined) return undefined
-  const scanned = stripQuotedAndComments(value)
+  const scanned = stripComments(value)
   const [authserv = '', ...rest] = scanned.text.split(';')
   if (authserv.trim().split(/\s+/)[0]?.toLowerCase() !== 'mx.google.com') return undefined
-  if (!scanned.balanced) return { unreadable: true as const }
+  if (!scanned.balanced || value.includes('"')) return { unreadable: true as const }
   const segments: Segment[] = []
   for (const text of rest) {
     const m = text.match(/^\s*([a-z][a-z0-9-]*)\s*=\s*([a-z]+)/i)

@@ -66,12 +66,24 @@ describe('senderIdentity', () => {
     expect(id.signedBy).toBe('evil.com')
   })
 
-  it('ignores a quoted local part that smuggles in segments', () => {
+  it('fails on a quoted local part that smuggles in segments', () => {
+    for (const value of [
+      'mx.google.com; spf=pass smtp.mailfrom="x; dmarc=pass header.from=victim.com; dkim=pass header.d=victim.com "@evil.com',
+      'mx.google.com; spf=pass smtp.mailfrom="x; dmarc=pass header.from=victim.com"@evil.com',
+    ]) {
+      const id = senderIdentity([auth(value)], 'ceo@victim.com')
+      expect(id, value).toMatchObject({ status: 'failed', reason: 'Authentication results could not be read' })
+    }
+  })
+
+  it('fails when a quoted local part closes the Gmail comment early', () => {
+    const local = '"a) ; dmarc=pass header.from=victim.com; dkim=pass header.d=victim.com; foo=(b"@evil.com'
     const id = senderIdentity(
-      [auth('mx.google.com; spf=pass smtp.mailfrom="x; dmarc=pass header.from=victim.com; dkim=pass header.d=victim.com "@evil.com')],
+      [auth(`mx.google.com; spf=pass (google.com: domain of ${local} designates 1.2.3.4 as permitted sender) smtp.mailfrom=${local}`)],
       'ceo@victim.com',
     )
-    expect(id.status).toBe('unverified')
+    expect(id).toMatchObject({ status: 'failed', reason: 'Authentication results could not be read' })
+    expect(id.signedBy).toBeUndefined()
   })
 
   it('does not let a quoted "(" hide or forge later segments', () => {
@@ -87,7 +99,7 @@ describe('senderIdentity', () => {
       [auth('mx.google.com; dkim=pass header.i="@victim.com"; dmarc=pass header.from=victim.com')],
       'ceo@victim.com',
     )
-    expect(quoted.status).toBe('unverified')
+    expect(quoted.status).toBe('failed')
     const open = senderIdentity(
       [auth('mx.google.com; dkim=pass header.d=evil.com; spf=pass smtp.mailfrom="x; dmarc=pass header.from=victim.com')],
       'ceo@victim.com',
@@ -101,8 +113,21 @@ describe('senderIdentity', () => {
       'x@evil.com',
     )
     expect(id).toMatchObject({ status: 'failed', reason: 'Authentication results could not be read' })
-    const unclosed = senderIdentity([auth('mx.google.com; dkim=pass (header.d=a.com; dmarc=pass header.from=a.com')], 'x@a.com')
-    expect(unclosed.status).toBe('failed')
+    for (const value of [
+      'mx.google.com; dkim=pass (header.d=a.com; dmarc=pass header.from=a.com',
+      'mx.google.com; dkim=pass (a (b) header.d=a.com; dmarc=pass header.from=a.com',
+      'mx.google.com; dkim=pass a) header.d=a.com; dmarc=pass header.from=a.com',
+    ]) {
+      expect(senderIdentity([auth(value)], 'x@a.com'), value).toMatchObject({
+        status: 'failed',
+        reason: 'Authentication results could not be read',
+      })
+    }
+  })
+
+  it('does not fail a foreign Authentication-Results for its quotes', () => {
+    const id = senderIdentity([auth('evil.example; spf=pass smtp.mailfrom="x"@a.com')], 'x@a.com')
+    expect(id).toMatchObject({ status: 'unverified', reason: 'Not checked by Gmail' })
   })
 
   it('normalises signedBy', () => {
@@ -110,12 +135,18 @@ describe('senderIdentity', () => {
     expect(id.signedBy).toBe('mail.a.com')
   })
 
-  it('handles nested comments and quoted strings', () => {
-    const id = senderIdentity(
-      [auth('mx.google.com; dkim=pass (a (b dmarc=pass) c) header.d=a.com; dmarc=fail (a \\) "b") header.from=a.com')],
+  it('handles nested comments and escaped parens', () => {
+    const failed = senderIdentity(
+      [auth('mx.google.com; dkim=pass (a (b dmarc=pass) c) header.d=a.com; dmarc=fail (a \\) b) header.from=a.com')],
       'x@a.com',
     )
-    expect(id.status).toBe('failed')
+    expect(failed.status).toBe('failed')
+    expect(failed.reason).not.toBe('Authentication results could not be read')
+    const verified = senderIdentity(
+      [auth('mx.google.com; dkim=pass (a (b; dmarc=fail \\( c) d) header.d=a.com; dmarc=pass header.from=a.com')],
+      'x@a.com',
+    )
+    expect(verified.status).toBe('verified')
   })
 
   it('reads results case-insensitively', () => {
