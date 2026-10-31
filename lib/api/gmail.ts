@@ -12,7 +12,8 @@ import {
 import { debugLog } from '../debugLog'
 import { liftBackgroundImages } from '../emailBackground'
 import { getAccessToken, getAccounts } from '../auth/oauth'
-import { buildReply, toBase64Url, type Recipients } from '../reply'
+import { senderIdentity, type SenderIdentity } from '../mail/identity'
+import { buildReply,toBase64Url, type Recipients } from '../reply'
 import { parseInvite, type CalendarEvent } from '../calendar'
 
 export interface Feed {
@@ -58,6 +59,8 @@ interface Message {
   contentText?: string // Email body (plain text, optional)
   attachments?: Attachment[] // Attachments (if any)
   event?: CalendarEvent // From an invite's text/calendar part
+  identity: SenderIdentity // Who sent it, from Gmail's authentication verdict
+  labelIds: string[] // Gmail labels of this message
 }
 
 // Bumped whenever the ThreadMail produced from a thread changes in a way that
@@ -69,7 +72,8 @@ interface Message {
 //
 // Version 2: built from the Gmail API's MIME parts instead of the print view.
 // Version 3: calendar invites' events.
-export const CURRENT_EXTRACT_VERSION = 3
+// Version 4: sender identity and labels per message.
+export const CURRENT_EXTRACT_VERSION = 4
 
 export interface ThreadMail {
   subject: string
@@ -376,6 +380,8 @@ export function messageToMail(
     replyTo: header(msg.payload, 'Reply-To'),
     contentHtml: body.contentHtml,
     contentText: body.contentText,
+    identity: senderIdentity(msg.payload.headers ?? [], from.email),
+    labelIds: msg.labelIds ?? [],
   }
   if (attachments.length) message.attachments = attachments
   const event = calendar && parseInvite(decode(calendar))

@@ -8,6 +8,7 @@ import { createStyleSheets } from '@/lib/addStyle'
 import { DARK_MODE_RULES } from './DetailPage'
 import type { EmailThread } from '@/lib/StateManager'
 import { CURRENT_EXTRACT_VERSION, type ThreadMail } from '@/lib/api/gmail'
+import { senderIdentity } from '@/lib/mail/identity'
 
 vi.stubGlobal('browser', fakeBrowser)
 vi.stubGlobal('chrome', fakeBrowser)
@@ -24,6 +25,8 @@ function makeThread(messageCount: number, overrides: Partial<EmailThread> = {}):
     cc: [],
     contentHtml: `<p>Body ${i}</p>`,
     contentText: `Body ${i}`,
+    identity: senderIdentity([], `sender${i}@example.com`),
+    labelIds: [],
   }))
   return {
     title: 'Test',

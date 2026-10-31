@@ -178,6 +178,9 @@ describe('threadToFeed / threadToMail', () => {
     const mail = threadToMail(thread)
     expect(mail.messageCount).toBe(2)
     expect(mail.extractVersion).toBe(CURRENT_EXTRACT_VERSION)
+    expect(mail.extractVersion).toBe(4)
+    expect(mail.messages[1]!.identity.status).toBe('unverified')
+    expect(mail.messages[1]!.labelIds).toEqual(['INBOX', 'IMPORTANT'])
   })
 })
 

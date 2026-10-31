@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildReply, replyRecipients, replySubject, toBase64Url } from './reply'
+import { senderIdentity } from './mail/identity'
 
 const message = {
   senderName: 'Bob',
@@ -8,6 +9,8 @@ const message = {
   to: ['Me <me@gmail.com>', 'Carol <carol@example.com>'],
   cc: ['dave@example.com', 'BOB@example.com'],
   contentHtml: '',
+  identity: senderIdentity([], 'bob@example.com'),
+  labelIds: [],
 }
 
 describe('replyRecipients', () => {
