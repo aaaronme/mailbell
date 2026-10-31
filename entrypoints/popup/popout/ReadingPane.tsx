@@ -1,6 +1,4 @@
-import { useEffect } from 'react'
-import { getRouteApi, useNavigate, useRouter } from '@tanstack/react-router'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { getRouteApi } from '@tanstack/react-router'
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
@@ -16,7 +14,7 @@ import {
   Trash2Icon,
   type LucideIcon,
 } from 'lucide-react'
-import { ThreadView } from '@/components/mail/ThreadView'
+import { ThreadView, type ReplyHandle } from '@/components/mail/ThreadView'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -25,56 +23,32 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { openMailInWeb, parseThreadUrl } from '@/lib/api/gmail'
-import { removesFromFolder, type ActionTarget, type MailAction } from '@/lib/mail/actions'
-import { useMarkRead } from '@/lib/mail/markRead'
-import { useLabels, useOpenThread, useThreadList } from '@/lib/mail/queries'
-import { runUndoable } from '@/lib/mail/undo'
-import { isSettingsChange, settingsOptions } from '@/lib/settings'
+import { useLabels, useOpenThread } from '@/lib/mail/queries'
+import type { MailActions } from './useMailActions'
+
+export type LabelMenu = 'label' | 'move' | null
 
 const route = getRouteApi('/mail')
 
-// The bar acts on `targets`; `labelIds` is what each of them currently has.
-interface Targets {
-  targets: ActionTarget[]
-  labelIds: string[][]
-}
-
 export function ReadingPane({
-  checked,
-  onCheckedChange,
+  actions,
+  engage,
+  labelMenu,
+  onLabelMenuChange,
+  replyRef,
+  scrollRef,
 }: {
-  checked: Set<string>
-  onCheckedChange: (next: Set<string>) => void
+  actions: MailActions
+  engage: () => void
+  labelMenu: LabelMenu
+  onLabelMenuChange: (next: LabelMenu) => void
+  replyRef: React.Ref<ReplyHandle>
+  scrollRef: React.Ref<HTMLDivElement>
 }) {
-  const search = route.useSearch()
-  const { thread: url, folder } = search
-  const navigate = useNavigate({ from: '/mail' })
-  const router = useRouter()
-  const queryClient = useQueryClient()
-  const { rows } = useThreadList(search)
+  const { thread: url, folder } = route.useSearch()
   const open = useOpenThread(url)
   const parsed = url ? parseThreadUrl(url) : null
-
-  const settings = useQuery(settingsOptions).data
-  useEffect(() => {
-    // The popup's Settings page lives in another document.
-    const onChanged = (changes: Record<string, unknown>, area: string) => {
-      if (isSettingsChange(changes, area)) void queryClient.invalidateQueries({ queryKey: settingsOptions.queryKey })
-    }
-    browser.storage.onChanged.addListener(onChanged)
-    return () => browser.storage.onChanged.removeListener(onChanged)
-  }, [queryClient])
-  // Unknown until loaded: nothing is marked on a guess.
-  const { engage, keepUnread } = useMarkRead(open.data, settings?.markRead ?? 'manual')
-
-  const here: ActionTarget[] = url && parsed ? [{ ...parsed, url }] : []
-  const picked = rows.filter((it) => checked.has(it.url))
-  const { targets, labelIds }: Targets = picked.length
-    ? {
-        targets: picked.map((it) => ({ account: it.account, threadId: it.threadId, url: it.url })),
-        labelIds: picked.map((it) => it.labelIds),
-      }
-    : { targets: here, labelIds: [open.data?.labelIds ?? []] }
+  const { run, targets, everyHas, starred } = actions
   const labels = useLabels(targets[0]?.account ?? '').data
 
   if (!url || !parsed) {
@@ -85,52 +59,31 @@ export function ReadingPane({
     )
   }
 
-  const everyHas = (id: string) => labelIds.every((it) => it.includes(id))
-
-  // The next row after the open one leaves, by the list as it was before.
-  const advance = (gone: Set<string>) => {
-    const at = rows.findIndex((it) => it.url === url)
-    const stays = (it: { url: string }) => !gone.has(it.url)
-    const next = rows.slice(at + 1).find(stays) ?? rows.slice(0, Math.max(at, 0)).findLast(stays)
-    void navigate({ search: (prev) => ({ ...prev, thread: next?.url }) })
-  }
-
-  const run = async (action: MailAction) => {
-    if (action.kind === 'unread' && targets.some((it) => it.url === url)) keepUnread()
-    const ok = await runUndoable(action, targets)
-    if (!ok || !removesFromFolder(action, folder)) return
-    if (picked.length) onCheckedChange(new Set())
-    const gone = new Set(targets.map((it) => it.url))
-    // Only while the acted-on thread is still the open one.
-    if (gone.has(url) && router.state.location.search.thread === url) advance(gone)
-  }
-
   const userLabels = (labels ?? []).filter((it) => it.type === 'user').sort((a, b) => a.name.localeCompare(b.name))
   const oneAccount = new Set(targets.map((it) => it.account)).size === 1
   const canMove = oneAccount && (folder === 'INBOX' || userLabels.some((it) => it.id === folder))
-  const starred = everyHas('STARRED')
 
   return (
     <div data-testid="reading-pane" className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-12 shrink-0 items-center gap-1 border-b border-foreground/10 px-2">
-        <BarButton title="Archive (e)" icon={ArchiveIcon} onClick={() => void run({ kind: 'archive' })} />
+        <BarButton title="Archive (e)" icon={ArchiveIcon} onClick={() => void actions.archive()} />
         {folder === 'TRASH' ? (
-          <BarButton title="Restore" icon={ArchiveRestoreIcon} onClick={() => void run({ kind: 'restore' })} />
+          <BarButton title="Restore" icon={ArchiveRestoreIcon} onClick={() => void actions.trash()} />
         ) : (
-          <BarButton title="Delete (#)" icon={Trash2Icon} onClick={() => void run({ kind: 'trash' })} />
+          <BarButton title="Delete (#)" icon={Trash2Icon} onClick={() => void actions.trash()} />
         )}
         {folder === 'SPAM' ? (
-          <BarButton title="Not spam" icon={InboxIcon} onClick={() => void run({ kind: 'notSpam' })} />
+          <BarButton title="Not spam" icon={InboxIcon} onClick={() => void actions.spam()} />
         ) : (
-          <BarButton title="Spam (!)" icon={OctagonAlertIcon} onClick={() => void run({ kind: 'spam' })} />
+          <BarButton title="Spam (!)" icon={OctagonAlertIcon} onClick={() => void actions.spam()} />
         )}
         <BarButton title="Mark unread (Shift+U)" icon={MailIcon} onClick={() => void run({ kind: 'unread' })} />
         <BarButton
           title={starred ? 'Unstar (s)' : 'Star (s)'}
           icon={StarIcon}
-          onClick={() => void run({ kind: starred ? 'unstar' : 'star' })}
+          onClick={() => void actions.toggleStar()}
         />
-        <DropdownMenu>
+        <DropdownMenu open={labelMenu === 'label'} onOpenChange={(on) => onLabelMenuChange(on ? 'label' : null)}>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" title="Label as (l)" aria-label="Label as" disabled={!oneAccount}>
               <TagIcon />
@@ -152,7 +105,7 @@ export function ReadingPane({
             })}
           </DropdownMenuContent>
         </DropdownMenu>
-        <DropdownMenu>
+        <DropdownMenu open={labelMenu === 'move'} onOpenChange={(on) => onLabelMenuChange(on ? 'move' : null)}>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" title="Move to (v)" aria-label="Move to" disabled={!canMove}>
               <FolderInputIcon />
@@ -187,9 +140,15 @@ export function ReadingPane({
       </div>
       {/* The scroller engages on its own scroll too: ThreadView only hears
           scrolls of what it contains. */}
-      <div data-testid="reading-scroll" className="min-h-0 flex-1 overflow-y-auto" onScroll={engage}>
+      <div
+        ref={scrollRef}
+        tabIndex={-1}
+        data-testid="reading-scroll"
+        className="min-h-0 flex-1 overflow-y-auto outline-none"
+        onScroll={engage}
+      >
         {open.data ? (
-          <ThreadView thread={open.data} onEngage={engage} />
+          <ThreadView thread={open.data} onEngage={engage} replyRef={replyRef} shortcuts={false} />
         ) : (
           <p className="px-4 py-6 text-sm text-foreground/40">
             {open.error ? "Couldn't load this conversation." : 'Loading'}

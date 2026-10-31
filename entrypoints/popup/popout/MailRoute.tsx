@@ -1,14 +1,21 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeftIcon, PanelLeftIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Sidebar } from './Sidebar'
 import { ThreadList } from './ThreadList'
 import { useBootstrapCorrespondents } from './useBootstrapCorrespondents'
-import { ReadingPane } from './ReadingPane'
+import { ReadingPane, type LabelMenu } from './ReadingPane'
+import { ShortcutSheet } from './ShortcutSheet'
+import { useMailActions } from './useMailActions'
+import { usePopoutShortcuts } from './usePopoutShortcuts'
+import type { ReplyHandle } from '@/components/mail/ThreadView'
 import { useAccounts } from '@/lib/useAccounts'
 import { usePreload } from '@/lib/mail/preload'
-import { useThreadList } from '@/lib/mail/queries'
+import { useMarkRead } from '@/lib/mail/markRead'
+import { useOpenThread, useThreadList } from '@/lib/mail/queries'
+import { isSettingsChange, settingsOptions } from '@/lib/settings'
 
 const route = getRouteApi('/mail')
 
@@ -33,9 +40,43 @@ export function MailRoute() {
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const searchRef = useRef<HTMLInputElement>(null)
   const list = { checked, onCheckedChange: setChecked, searchRef }
-  const pane = { checked, onCheckedChange: setChecked }
+  const [sheet, setSheet] = useState(false)
+  const [labelMenu, setLabelMenu] = useState<LabelMenu>(null)
+  const readingRef = useRef<HTMLDivElement>(null)
+  const replyRef = useRef<ReplyHandle>(null)
   useBootstrapCorrespondents(useAccounts().data ?? [])
-  usePreload(useThreadList(search).rows, thread)
+  const { rows } = useThreadList(search)
+  usePreload(rows, thread)
+
+  const queryClient = useQueryClient()
+  const settings = useQuery(settingsOptions).data
+  useEffect(() => {
+    // The popup's Settings page lives in another document.
+    const onChanged = (changes: Record<string, unknown>, area: string) => {
+      if (isSettingsChange(changes, area)) void queryClient.invalidateQueries({ queryKey: settingsOptions.queryKey })
+    }
+    browser.storage.onChanged.addListener(onChanged)
+    return () => browser.storage.onChanged.removeListener(onChanged)
+  }, [queryClient])
+  // Unknown until loaded: nothing is marked on a guess.
+  const { engage, keepUnread } = useMarkRead(useOpenThread(thread).data, settings?.markRead ?? 'manual')
+  const actions = useMailActions({ checked, onCheckedChange: setChecked, keepUnread })
+  usePopoutShortcuts({
+    rows,
+    search,
+    checked,
+    setChecked,
+    navigate: (next) => void navigate({ search: next }),
+    actions,
+    engage,
+    focusReading: () => readingRef.current?.focus(),
+    openReply: (mode) => replyRef.current?.open(mode),
+    openLabelMenu: setLabelMenu,
+    searchRef,
+    showSheet: () => setSheet(true),
+    enabled: () => !sheet,
+  })
+  const pane = { actions, engage, labelMenu, onLabelMenuChange: setLabelMenu, replyRef, scrollRef: readingRef }
 
   useEffect(() => {
     if (wide) setDrawer(false)
@@ -49,9 +90,12 @@ export function MailRoute() {
 
   const clearThread = () => navigate({ search: (prev) => ({ ...prev, thread: undefined }) })
 
+  const sheetEl = <ShortcutSheet open={sheet} onOpenChange={setSheet} />
+
   if (!medium) {
     return (
       <div className="relative flex h-screen flex-col">
+        {sheetEl}
         {thread ? (
           <>
             <div className="flex h-12 shrink-0 items-center border-b border-foreground/10 px-2">
@@ -74,6 +118,7 @@ export function MailRoute() {
       className="relative grid h-screen"
       style={{ gridTemplateColumns: `${wide ? '224px ' : ''}360px minmax(0, 1fr)` }}
     >
+      {sheetEl}
       {wide && (
         <div className="min-h-0 overflow-y-auto border-r border-foreground/10">
           <Sidebar />

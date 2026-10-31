@@ -10,6 +10,7 @@ vi.stubGlobal('chrome', fakeBrowser)
 vi.mock('@/lib/mail/undo', () => ({
   runUndoable: vi.fn(async () => true),
   runSilent: vi.fn(async () => undefined),
+  undoLatest: vi.fn(async () => undefined),
 }))
 
 const { createAppRouter } = await import('../router')

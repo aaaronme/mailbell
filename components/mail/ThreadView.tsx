@@ -5,7 +5,7 @@ import type { OpenThread } from '@/lib/api/mailbox'
 import type { EmailThread } from '@/lib/StateManager'
 import dayjs from 'dayjs'
 import { PaperclipIcon, ChevronsUpDownIcon, ReplyIcon, ReplyAllIcon, CalendarIcon, VideoIcon } from 'lucide-react'
-import { Fragment, memo, useEffect, useMemo, useState } from 'react'
+import { Fragment, memo, useEffect, useImperativeHandle, useMemo, useState } from 'react'
 import root from 'react-shadow'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCollapseState } from '@/lib/useCollapseState'
@@ -173,13 +173,34 @@ function MeetingBar({ thread }: { thread: Thread }) {
 }
 
 // Reply or reply all, in plain text, without leaving the popup.
-function ReplyBox({ thread }: { thread: Thread }) {
+export interface ReplyHandle {
+  open(mode: 'reply' | 'all'): void
+}
+
+// `shortcuts` off leaves r and a to the host; `replyRef` lets it open the box.
+function ReplyBox({
+  thread,
+  shortcuts = true,
+  replyRef,
+}: {
+  thread: Thread
+  shortcuts?: boolean
+  replyRef?: React.Ref<ReplyHandle>
+}) {
   const [mode, setMode] = useState<'reply' | 'all' | null>(null)
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const last = thread.messages.at(-1)
   const canReplyAll = !!last && replyRecipients(last, thread.account, true).cc.length > 0
-  useShortcuts({ r: () => setMode('reply'), a: () => canReplyAll && setMode('all') }, mode === null && !!last)
+  const openReply = (next: 'reply' | 'all') => {
+    if (next === 'reply' || canReplyAll) setMode(next)
+  }
+  useShortcuts({ r: () => openReply('reply'), a: () => openReply('all') }, shortcuts && mode === null && !!last)
+  useImperativeHandle(replyRef, () => ({
+    open: (next) => {
+      if (mode === null && last) openReply(next)
+    },
+  }))
   if (!last) return null
 
   if (!mode) {
@@ -252,6 +273,9 @@ export function ThreadView(props: {
   onEngage?: () => void
   // Lets a toolbar outside the view drive collapsing; the view owns one otherwise.
   collapse?: ReturnType<typeof useCollapseState>
+  // The host owns r and a (and opens the reply box through `replyRef`).
+  shortcuts?: boolean
+  replyRef?: React.Ref<ReplyHandle>
 }) {
   const { thread, onEngage } = props
   const queryClient = useQueryClient()
@@ -335,7 +359,7 @@ export function ThreadView(props: {
             )
           })}
         </div>
-        <ReplyBox thread={thread} />
+        <ReplyBox thread={thread} shortcuts={props.shortcuts} replyRef={props.replyRef} />
       </div>
       </Fragment>
     </div>
