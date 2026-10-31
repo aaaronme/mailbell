@@ -1,8 +1,9 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import { ArrowLeftIcon, PanelLeftIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Sidebar } from './Sidebar'
+import { ThreadList } from './ThreadList'
 import { useBootstrapCorrespondents } from './useBootstrapCorrespondents'
 import { useAccounts } from '@/lib/useAccounts'
 
@@ -19,8 +20,7 @@ export function useMediaQuery(query: string): boolean {
   )
 }
 
-// Tasks 11 and 13 replace these.
-const ThreadList = () => <div data-testid="thread-list" className="min-h-0 flex-1" />
+// Task 13 replaces this.
 const ReadingPane = () => <div data-testid="reading-pane" className="min-h-0 flex-1" />
 
 export function MailRoute() {
@@ -29,6 +29,9 @@ export function MailRoute() {
   const wide = useMediaQuery('(min-width: 1000px)')
   const medium = useMediaQuery('(min-width: 700px)')
   const [drawer, setDrawer] = useState(false)
+  const [checked, setChecked] = useState<Set<string>>(new Set())
+  const searchRef = useRef<HTMLInputElement>(null)
+  const list = { checked, onCheckedChange: setChecked, searchRef }
   useBootstrapCorrespondents(useAccounts().data ?? [])
 
   useEffect(() => {
@@ -56,7 +59,7 @@ export function MailRoute() {
             <ReadingPane />
           </>
         ) : (
-          <ListColumn onToggleSidebar={() => setDrawer(!drawer)} />
+          <ListColumn {...list} onToggleSidebar={() => setDrawer(!drawer)} />
         )}
         {drawer && <SidebarOverlay onClose={() => setDrawer(false)} />}
       </div>
@@ -74,7 +77,7 @@ export function MailRoute() {
         </div>
       )}
       <div className="flex min-h-0 flex-col border-r border-foreground/10">
-        <ListColumn onToggleSidebar={wide ? undefined : () => setDrawer(!drawer)} />
+        <ListColumn {...list} onToggleSidebar={wide ? undefined : () => setDrawer(!drawer)} />
       </div>
       <div className="flex min-h-0 flex-col">
         <ReadingPane />
@@ -84,7 +87,10 @@ export function MailRoute() {
   )
 }
 
-function ListColumn({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
+function ListColumn({
+  onToggleSidebar,
+  ...list
+}: { onToggleSidebar?: () => void } & React.ComponentProps<typeof ThreadList>) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {onToggleSidebar && (
@@ -94,7 +100,7 @@ function ListColumn({ onToggleSidebar }: { onToggleSidebar?: () => void }) {
           </Button>
         </div>
       )}
-      <ThreadList />
+      <ThreadList {...list} />
     </div>
   )
 }
