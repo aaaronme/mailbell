@@ -5,14 +5,14 @@ The popup is a small, dense, reading-first surface. The design follows from that
 ## Principles
 
 - **Monochrome and foreground-relative.** Almost every color is the foreground at some opacity: `text-foreground/60`, `border-foreground/10`, `bg-foreground/5`. Because the foreground flips with the theme, the same class works in both, and nothing needs a `dark:` variant.
-- **One accent.** `bell` (teal) marks the one thing worth spotting at a glance: a one-time code. It is not used for links, buttons or decoration.
+- **One accent.** `bell` (teal, sky cyan in dark) marks the one thing worth spotting at a glance: a one-time code. It is not used for links, buttons or decoration.
 - **Flat.** No shadows on cards and no boxes inside boxes. Sections are separated by a `border-foreground/10` hairline, and rows run edge to edge. The only floating surface is a menu or toast (`menu-surface`).
 - **Square.** Rows, fields, avatars and chips have square corners. Only buttons are rounded: `rounded-md`, or `rounded-full` for ghost icon buttons. The `Button` primitive owns that radius, so don't pass one.
 - **Quiet type.** Hierarchy comes from weight and opacity, not size.
 
 ## Tokens
 
-The tokens are defined in `entrypoints/popup/style.css`. Light is the default, and dark comes from `prefers-color-scheme`.
+The tokens are defined in `entrypoints/popup/style.css`. Light is the default, and dark comes from `prefers-color-scheme`. Dark is OrderX Blue: a navy page (`#00111b`), slightly lighter menus (`#021b27`) and a sky-cyan `bell` (`#7cd0e8`).
 
 | Token | Use |
 | --- | --- |

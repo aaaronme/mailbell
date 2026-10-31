@@ -18,16 +18,18 @@
   --bell: #087f8c;
 }
 
+/* Dark is OrderX Blue (frontend-v2's navy theme), solid rather than its
+   banded gradient: the sticky bars need an opaque fill that matches the page. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0c0c0d;
+    --background: #00111b;
     --foreground: #ffffff;
-    --card: #0c0c0d;
-    --popover: #0c0c0d;
+    --card: #021b27;
+    --popover: #021b27;
     /* Solid white would glare in a dark popup: a translucent white fill. */
     --emphasis: rgb(255 255 255 / 0.2);
     --emphasis-foreground: #ffffff;
-    --bell: #18e2f4;
+    --bell: #7cd0e8;
   }
 }
 
