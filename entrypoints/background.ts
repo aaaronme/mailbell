@@ -24,6 +24,7 @@ import { planUnsubscribe } from '@/lib/unsubscribe'
 import { registerActionMenus } from '@/lib/menu'
 import { menus } from '@/lib/constants'
 import { debugLog } from '@/lib/debugLog'
+import { openPopoutOn } from '@/lib/openPopout'
 import { playNotificationSound } from '@/lib/sound'
 import { getSettings, isSettingsChange, notificationSound } from '@/lib/settings'
 
@@ -99,9 +100,7 @@ async function start() {
   browser.notifications.onClicked.addListener(async (id) => {
     if (!id.startsWith(NOTIFICATION_PREFIX)) return
     await browser.notifications.clear(id)
-    // openPopup needs a focused window (and Chrome 127); otherwise open the
-    // mail itself, in its own account.
-    await browser.action.openPopup().catch(() => openMailInWeb(id.slice(NOTIFICATION_PREFIX.length)))
+    await openPopoutOn(id.slice(NOTIFICATION_PREFIX.length))
   })
   const stateManager = new StateManager({
     checkLoginStatus,

@@ -37,6 +37,9 @@ export type GmailAction =
 
 export const popupMessager = defineExtensionMessaging<{
   refreshPopup(): void
+  // background to popout tab: show this thread and focus the tab -> true if a
+  // popout answered
+  openThread(url: string): boolean
 }>()
 
 // Messaging rethrows a handler's error as a plain Error with the same message,

@@ -19,13 +19,13 @@ function AppContent() {
     // re-reads storage, and (b) kick off an actual fresh remote fetch:
     // background's own alarm runs on its own schedule, and the popup could
     // sit on stale data until it fires.
-    popupMessager.onMessage('refreshPopup', () => {
+    const removeRefresh = popupMessager.onMessage('refreshPopup', () => {
       queryClient.invalidateQueries({ queryKey: mailQueryKey })
     })
     // An ordinary poll: the refresh button is what re-reads every thread.
     bgMessager.sendMessage('poll', undefined).catch((err) => console.error('poll failed', err))
     return () => {
-      popupMessager.removeAllListeners()
+      removeRefresh()
     }
   })
   return <RouterProvider router={router} />
