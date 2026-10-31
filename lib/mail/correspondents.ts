@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { queryOptions, useQuery } from '@tanstack/react-query'
 import { gmailFetch, header, mapLimit, parseAddressField, parseMailbox, type GmailPart } from '../api/gmail'
 
 const KEY = 'correspondents'
@@ -79,6 +79,9 @@ async function seed(account: string): Promise<void> {
   )
 }
 
+export const correspondentsOptions = (account: string) =>
+  queryOptions({ queryKey: ['correspondents', account], queryFn: () => getCorrespondents(account) })
+
 export function useCorrespondents(account: string) {
-  return useQuery({ queryKey: ['correspondents', account], queryFn: () => getCorrespondents(account) })
+  return useQuery(correspondentsOptions(account))
 }

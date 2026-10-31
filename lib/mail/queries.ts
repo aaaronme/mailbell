@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { queryOptions, useInfiniteQuery, useQuery } from '@tanstack/react-query'
+import { useCallback, useMemo } from 'react'
+import { queryOptions, type InfiniteData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { getOpenThread, listLabels, listThreadPage, type ThreadRow } from '../api/mailbox'
 import { parseThreadUrl } from '../api/gmail'
 import type { MailSearch } from './search'
@@ -52,6 +52,10 @@ function useAllInboxes(search: MailSearch, enabled: boolean): ThreadListResult {
   const query = listQuery('INBOX', { category: search.cat, q: search.q, unread: search.unread })
   const accountsQuery = useAccounts()
   const accounts = useMemo(() => (accountsQuery.data ?? []).map((it) => it.email), [accountsQuery.data])
+  const select = useCallback(
+    (data: InfiniteData<AllInboxesPage, AllPageParam>) => mergeInboxes(toAccountPages(data.pages, accounts)).rows,
+    [accounts],
+  )
   const result = useInfiniteQuery({
     queryKey: allInboxesKey(query, accounts),
     queryFn: async ({ pageParam }): Promise<AllInboxesPage> => {
@@ -76,6 +80,7 @@ function useAllInboxes(search: MailSearch, enabled: boolean): ThreadListResult {
       const open = merged.filter((it) => !it.exhausted).map((it) => it.account)
       if (!open.length) return undefined
       const { limiting } = mergeInboxes(merged)
+      // limiting is empty only when a date is unparseable (NaN never equals the cutoff); page everything open rather than stall.
       const next = limiting.length ? limiting : open
       return Object.fromEntries(
         accounts.map((account) => [
@@ -84,7 +89,7 @@ function useAllInboxes(search: MailSearch, enabled: boolean): ThreadListResult {
         ]),
       )
     },
-    select: (data) => mergeInboxes(toAccountPages(data.pages, accounts)).rows,
+    select,
     enabled: enabled && accountsQuery.isSuccess,
   })
   return {

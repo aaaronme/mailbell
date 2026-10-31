@@ -250,6 +250,8 @@ describe('ThreadList in All inboxes', () => {
   let inboxes: Record<string, Record<string, [string, number]>>
   // Per account: the threads of its second page, if it has one.
   let later: Record<string, Record<string, [string, number]>>
+  // The accounts whose list call carried a pageToken, in order.
+  let pageTokenCalls: string[]
 
   beforeEach(async () => {
     fakeBrowser.reset()
@@ -266,6 +268,7 @@ describe('ThreadList in All inboxes', () => {
     setTokenSource(async (account) => account)
     labels = []
     later = {}
+    pageTokenCalls = []
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string, init?: RequestInit) => {
@@ -276,6 +279,7 @@ describe('ThreadList in All inboxes', () => {
           const own = inboxes[account]
           if (!own) return new Response('no', { status: 500 })
           const second = url.searchParams.has('pageToken')
+          if (second) pageTokenCalls.push(account)
           const ids = Object.keys(second ? later[account]! : own)
           return json({ threads: ids.map((id) => ({ id })), ...(!second && later[account] ? { nextPageToken: 'p2' } : {}) })
         }
@@ -318,6 +322,34 @@ describe('ThreadList in All inboxes', () => {
     await mount('account=all&folder=INBOX&cat=primary')
     await vi.waitFor(() => expect(order()).toEqual(['a1', 'b1', 'a2', 'a3', 'a4', 'b2']))
     expect(document.querySelector('[data-testid="thread-sentinel"]')).toBeNull()
+  })
+
+  it('with both accounts paged, only the limiting one is fetched each round', async () => {
+    inboxes = {
+      [A]: { a1: ['x@example.net', 5], a2: ['x@example.net', 30] },
+      [B]: { b1: ['x@example.net', 10], b2: ['x@example.net', 20] },
+    }
+    later = { [A]: { a3: ['x@example.net', 40] }, [B]: { b3: ['x@example.net', 50] } }
+    await mount('account=all&folder=INBOX&cat=primary')
+    await vi.waitFor(() => expect(order()).toEqual(['a1', 'b1', 'b2', 'a2', 'a3', 'b3']))
+    // B's oldest (20 minutes ago) is the newer, so B limits first; once B is exhausted A does.
+    expect(pageTokenCalls).toEqual([B, A])
+  })
+
+  it('pages an account whose first page is empty but has a token before the rest', async () => {
+    inboxes = { [A]: {}, [B]: { b1: ['x@example.net', 10] } }
+    later = { [A]: { a1: ['x@example.net', 5] } }
+    await mount('account=all&folder=INBOX&cat=primary')
+    await vi.waitFor(() => expect(order()).toEqual(['a1', 'b1']))
+    expect(pageTokenCalls).toEqual([A])
+  })
+
+  it('does not say Nothing here while more pages are coming', async () => {
+    inboxes = { [A]: {}, [B]: { b1: ['x@example.net', 10] } }
+    later = { [A]: { a1: ['x@example.net', 5] } }
+    const { screen } = await mount('account=all&folder=INBOX&cat=primary')
+    await vi.waitFor(() => expect(order()).toEqual(['a1', 'b1']))
+    expect(screen.getByText('Nothing here').elements()).toHaveLength(0)
   })
 
   it('still shows the accounts that load when one fails', async () => {

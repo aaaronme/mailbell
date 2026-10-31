@@ -8,7 +8,7 @@ import type { ThreadRow } from '@/lib/api/mailbox'
 import { CATEGORY_LABEL, SYSTEM_FOLDERS, type Category } from '@/lib/mail/folders'
 import { registrableDomain } from '@/lib/mail/identity'
 import { useQueries } from '@tanstack/react-query'
-import { getCorrespondents } from '@/lib/mail/correspondents'
+import { correspondentsOptions } from '@/lib/mail/correspondents'
 import { useAccounts } from '@/lib/useAccounts'
 import { useLabels, useThreadList } from '@/lib/mail/queries'
 import type { MailAction } from '@/lib/mail/actions'
@@ -64,7 +64,7 @@ export function ThreadList({
     [mailboxes],
   )
   const knownDomains = useQueries({
-    queries: mailboxes.map((it) => ({ queryKey: ['correspondents', it], queryFn: () => getCorrespondents(it) })),
+    queries: mailboxes.map(correspondentsOptions),
     combine,
   })
 
@@ -251,7 +251,7 @@ export function ThreadList({
           />
         ))}
         {hasNextPage && <div ref={sentinel} data-testid="thread-sentinel" className="h-px" />}
-        {!isPending && !rows.length && (
+        {!isPending && !rows.length && !hasNextPage && (
           <p className="p-6 text-center text-sm text-foreground/40">{error ? "Couldn't load mail" : 'Nothing here'}</p>
         )}
       </div>
