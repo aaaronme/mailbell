@@ -31,6 +31,16 @@ describe('openPopoutOn', () => {
     expect(validateMailSearch(search)).toMatchObject({ account, folder: 'INBOX', thread: threadUrl })
   })
 
+  it("brings the new tab's window to the front, and opens the tab even if that fails", async () => {
+    vi.spyOn(popupMessager, 'sendMessage').mockRejectedValue(new Error('no receiver'))
+    vi.spyOn(fakeBrowser.tabs, 'create').mockResolvedValue({ id: 3, windowId: 7 } as never)
+    const update = vi.spyOn(fakeBrowser.windows, 'update').mockResolvedValue({} as never)
+    await openPopoutOn(threadUrl)
+    expect(update).toHaveBeenCalledWith(7, { focused: true })
+    update.mockRejectedValue(new Error('no windows'))
+    await expect(openPopoutOn(threadUrl)).resolves.toBeUndefined()
+  })
+
   it('opens a new tab when the message goes unanswered', async () => {
     vi.spyOn(popupMessager, 'sendMessage').mockResolvedValue(undefined as never)
     const create = vi.spyOn(fakeBrowser.tabs, 'create')

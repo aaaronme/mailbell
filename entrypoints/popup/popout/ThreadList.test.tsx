@@ -22,6 +22,8 @@ let failingAuth = ''
 // Thread ids whose snippet carries an HTML-entity dash after the word "code".
 let entityThreads: string[] = []
 let emptyList = false
+// The second page repeats the first page's last thread, as after new mail.
+let overlap = false
 const listRequests: URL[] = []
 const actionRequests: string[] = []
 
@@ -65,7 +67,7 @@ function stubFetch() {
         listRequests.push(url)
         if (emptyList) return json({})
         const second = url.searchParams.has('pageToken')
-        const [from, count] = second ? [50, 10] : [0, 50]
+        const [from, count] = second ? (overlap ? [49, 11] : [50, 10]) : [0, 50]
         return json({
           threads: Array.from({ length: count }, (_, i) => ({ id: `t${from + i}` })),
           ...(second ? {} : { nextPageToken: 'p2' }),
@@ -109,6 +111,7 @@ describe('ThreadList', () => {
     failingAuth = ''
     entityThreads = []
     emptyList = false
+    overlap = false
     stubFetch()
   })
 
@@ -134,9 +137,22 @@ describe('ThreadList', () => {
     expect(calls()).toBe(before)
   })
 
+  it('shows a thread two pages both carry once', async () => {
+    overlap = true
+    await mount()
+    await vi.waitFor(() => expect(rows()).toHaveLength(50))
+    document.querySelector('[data-testid="thread-sentinel"]')!.scrollIntoView()
+    await vi.waitFor(() => expect(document.querySelector('[data-row="t59"]')).not.toBeNull())
+    expect(document.querySelectorAll('[data-row="t49"]')).toHaveLength(1)
+    expect(rows()).toHaveLength(60)
+  })
+
   it('unread switch', async () => {
     const { screen } = await mount()
     await vi.waitFor(() => expect(rows()).toHaveLength(50))
+    await expect
+      .element(screen.getByRole('button', { name: 'All', exact: true }))
+      .toHaveClass('bg-emphasis', 'text-emphasis-foreground')
     await screen.getByRole('button', { name: 'Unread', exact: true }).click()
     await vi.waitFor(() => expect(listRequests.at(-1)!.searchParams.getAll('labelIds')).toContain('UNREAD'))
   })

@@ -18,5 +18,14 @@ export function popoutUrl(threadUrl: string): string {
 // popouts, whichever answers first wins.
 export async function openPopoutOn(threadUrl: string): Promise<void> {
   const reused = await popupMessager.sendMessage('openThread', threadUrl).catch(() => false)
-  if (reused !== true) await browser.tabs.create({ url: popoutUrl(threadUrl) })
+  if (reused === true) return
+  const tab = await browser.tabs.create({ url: popoutUrl(threadUrl) })
+  // A notification click from a background window should bring the mail up;
+  // best effort, as the tab is open either way (and Android has no windows).
+  if (tab.windowId === undefined) return
+  try {
+    await browser.windows.update(tab.windowId, { focused: true })
+  } catch {
+    // The tab still opened.
+  }
 }

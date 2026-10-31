@@ -12,8 +12,9 @@ import { validateMailSearch } from './mailSearch'
 
 const route = getRouteApi('/mail')
 
-// labels.list carries no counts for the other system folders.
-const COUNTED_SYSTEM = new Set(['INBOX', 'SPAM', 'DRAFT'])
+// The system folders the sidebar shows an unread count on; listLabels fetches
+// counts for the categories too, but those show on the list's tabs.
+const SIDEBAR_COUNTED = new Set(['INBOX', 'SPAM', 'DRAFT'])
 
 const ROW = 'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 text-left text-sm transition-colors'
 
@@ -39,12 +40,12 @@ function Entry({
       data-folder={folder}
       onClick={onClick}
       style={indent ? { paddingLeft: 12 + indent * 12 } : undefined}
-      className={cn(ROW, active ? 'bg-foreground text-background' : 'text-foreground/70 hover:bg-foreground/5 hover:text-foreground')}
+      className={cn(ROW, active ? 'bg-emphasis text-emphasis-foreground' : 'text-foreground/70 hover:bg-foreground/5 hover:text-foreground')}
     >
       <span className="min-w-0 flex-1 truncate">{children}</span>
       {!!count && (
         <>
-          <span aria-hidden className={cn('tabular-nums', active ? 'text-background/70' : 'text-foreground/40')}>
+          <span aria-hidden className={cn('tabular-nums', active ? 'text-emphasis-foreground/70' : 'text-foreground/40')}>
             {count}
           </span>
           <span className="sr-only">, {count} unread</span>
@@ -143,7 +144,7 @@ function AccountSection({
               key={id}
               folder={id}
               active={isActive(id)}
-              count={COUNTED_SYSTEM.has(id) ? countOf(id) : undefined}
+              count={SIDEBAR_COUNTED.has(id) ? countOf(id) : undefined}
               onClick={() => open(email, id)}
             >
               {name}
@@ -191,7 +192,7 @@ function LabelRow({
             aria-expanded={expanded}
             onClick={() => setExpanded(!expanded)}
             style={{ left: depth * 12 }}
-            className={cn('absolute z-10 flex h-8 w-3 cursor-pointer items-center justify-center transition-colors', active ? 'text-background/70 hover:text-background' : 'text-foreground/40 hover:text-foreground')}
+            className={cn('absolute z-10 flex h-8 w-3 cursor-pointer items-center justify-center transition-colors', active ? 'text-emphasis-foreground/70 hover:text-emphasis-foreground' : 'text-foreground/40 hover:text-foreground')}
           >
             {expanded ? <ChevronDownIcon className="size-3" /> : <ChevronRightIcon className="size-3" />}
           </button>

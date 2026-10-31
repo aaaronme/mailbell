@@ -56,8 +56,8 @@ purify.addHook('afterSanitizeAttributes', (node) => {
   const bad = (url: string) => (remote ? isTrackerUrl(url) : !isLocalUrl(url))
   const badRef = (url: string) => (remote ? isTrackerUrl(url) : !url.startsWith('#') && !isLocalUrl(url))
   let hit = false
-  // Informational only: Task 6 restores by sanitizing again with remote set,
-  // never by reading this back.
+  // Informational only: showing remote content sanitizes the original again
+  // with remote set, so nothing reads this back.
   const remember = (value: string) => {
     if (!remote && !node.hasAttribute('data-remote-src')) node.setAttribute('data-remote-src', value)
   }

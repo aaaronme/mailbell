@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ThreadRow } from '../api/mailbox'
-import { mergeInboxes, type AccountPages } from './merge'
+import { mergeInboxes, toAccountPages, type AccountPages } from './merge'
 
 // Hours after a fixed origin, so the abstract 9.5 is a real timestamp.
 const at = (hours: number) => new Date(Date.UTC(2026, 0, 1) + hours * 3_600_000).toISOString()
@@ -49,5 +49,25 @@ describe('mergeInboxes', () => {
     const merged = mergeInboxes([pages('B', [9, 8], false), pages('A', [9, 8], false)])
     expect(merged.rows.map((it) => it.threadId)).toEqual(['A9', 'B9', 'A8', 'B8'])
     expect(merged.limiting).toEqual(['A', 'B'])
+  })
+})
+
+describe('toAccountPages', () => {
+  it('keeps the first of a thread that two pages both carry', () => {
+    // A thread that gained mail between page fetches moves up into a later page's overlap.
+    const first = { ...row('A', 10), subject: 'first' } as ThreadRow
+    const again = { ...row('A', 10), subject: 'again' } as ThreadRow
+    const [a] = toAccountPages(
+      [
+        { rows: [first, row('A', 9)], tokens: { A: 'p2' } },
+        { rows: [again, row('A', 8)], tokens: { A: null } },
+      ],
+      ['A'],
+    )
+    expect(a!.rows.map((it) => [it.threadId, it.subject])).toEqual([
+      ['A10', 'first'],
+      ['A9', undefined],
+      ['A8', undefined],
+    ])
   })
 })

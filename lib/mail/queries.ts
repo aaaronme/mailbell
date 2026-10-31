@@ -3,9 +3,9 @@ import { queryOptions, type InfiniteData, useInfiniteQuery, useQueries, useQuery
 import { getOpenThread, listLabels, listThreadPage, type GmailLabel, type ThreadRow } from '../api/mailbox'
 import { parseThreadUrl } from '../api/gmail'
 import type { MailSearch } from './search'
-import { listQuery, type Category } from './folders'
+import { listQuery } from './folders'
 import { useAccounts } from '../useAccounts'
-import { mergeInboxes, toAccountPages, type AllInboxesPage } from './merge'
+import { mergeInboxes, toAccountPages, uniqueRows, type AllInboxesPage } from './merge'
 
 // Every list key carries its folder at index 3; optimistic patching in
 // actions.ts relies on that.
@@ -13,8 +13,6 @@ export const mailKeys = {
   labels: (account: string) => ['mail', 'labels', account] as const,
   list: (account: string, folder: string, query: ReturnType<typeof listQuery>) =>
     ['mail', 'list', account, folder, query] as const,
-  all: (cat: Category | undefined, unread: boolean | undefined, q: string | undefined) =>
-    ['mail', 'list', 'all', 'INBOX', { cat, unread, q }] as const,
   thread: (account: string, threadId: string) => ['mail', 'thread', account, threadId] as const,
 }
 
@@ -147,7 +145,7 @@ export function useThreadList(search: MailSearch): ThreadListResult {
     enabled: account !== 'all',
     ...LIVE,
   })
-  const rows = useMemo(() => result.data?.pages.flatMap((it) => it.rows) ?? [], [result.data])
+  const rows = useMemo(() => uniqueRows(result.data?.pages.flatMap((it) => it.rows) ?? []), [result.data])
   if (account === 'all') return all
   return {
     rows,

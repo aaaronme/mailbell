@@ -186,7 +186,7 @@ export function ThreadList({
                 onClick={() => setSearch({ unread: it.label === 'Unread' ? true : undefined })}
                 className={cn(
                   'h-7 cursor-pointer px-2.5 transition-colors',
-                  it.on ? 'bg-foreground/10 text-foreground' : 'text-foreground/70 hover:bg-foreground/5 hover:text-foreground',
+                  it.on ? 'bg-emphasis text-emphasis-foreground' : 'text-foreground/70 hover:bg-foreground/5 hover:text-foreground',
                 )}
               >
                 {it.label}

@@ -122,8 +122,8 @@ describe('Sidebar', () => {
   it('marks the active entry inverted, with a lighter count', async () => {
     const { screen } = await mount()
     const all = screen.getByRole('button', { name: /^All inboxes/ })
-    await expect.element(all).toHaveClass('bg-foreground', 'text-background')
-    await expect.element(all.getByText('5', { exact: true })).toHaveClass('text-background/70')
+    await expect.element(all).toHaveClass('bg-emphasis', 'text-emphasis-foreground')
+    await expect.element(all.getByText('5', { exact: true })).toHaveClass('text-emphasis-foreground/70')
   })
 
   it('collapses an account section', async () => {

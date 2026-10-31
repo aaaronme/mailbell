@@ -16,6 +16,18 @@ export interface AllInboxesPage {
 
 const time = (row: ThreadRow) => Date.parse(row.date)
 
+// A thread that gets new mail between two page fetches moves up and can come
+// back in the next page too; the first, newer copy is the one shown.
+export function uniqueRows(rows: ThreadRow[]): ThreadRow[] {
+  const seen = new Set<string>()
+  return rows.filter((it) => {
+    const id = `${it.account}\n${it.threadId}`
+    if (seen.has(id)) return false
+    seen.add(id)
+    return true
+  })
+}
+
 const newestFirst = (a: ThreadRow, b: ThreadRow) =>
   time(b) - time(a) || a.account.localeCompare(b.account) || a.threadId.localeCompare(b.threadId)
 
@@ -26,7 +38,7 @@ export function toAccountPages(pages: AllInboxesPage[], accounts: string[]): Acc
     const asked = pages.filter((it) => account in it.tokens)
     return {
       account,
-      rows: pages.flatMap((it) => it.rows.filter((r) => r.account === account)),
+      rows: uniqueRows(pages.flatMap((it) => it.rows.filter((r) => r.account === account))),
       exhausted: asked.length > 0 && asked.at(-1)!.tokens[account] === null,
     }
   })

@@ -172,13 +172,10 @@ describe('actions', () => {
     await star
   })
 
-  it('patches the all-accounts key and a user-label folder', async () => {
-    const allKey = mailKeys.all(undefined, undefined, undefined)
+  it('archiving keeps the row in a user-label folder', async () => {
     const labelKey = mailKeys.list('me@gmail.com', 'Label_1', { labelIds: ['Label_1'], includeSpamTrash: false })
-    seed([row('A'), row('B')], allKey)
     seed([row('A'), row('B')], labelKey)
     await mod.applyAction({ kind: 'archive' }, [target('A')])
-    expect(cachedIds(allKey)).toEqual(['B'])
     // Archiving only leaves the Inbox; the label still holds the thread.
     expect(cachedIds(labelKey)).toEqual(['A', 'B'])
   })
