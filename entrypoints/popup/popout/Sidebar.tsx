@@ -16,7 +16,7 @@ const route = getRouteApi('/mail')
 // counts for the categories too, but those show on the list's tabs.
 const SIDEBAR_COUNTED = new Set(['INBOX', 'SPAM', 'DRAFT'])
 
-const ROW = 'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 text-left text-sm transition-colors'
+const ROW = 'flex h-8 w-full min-w-0 shrink-0 cursor-pointer items-center gap-2 px-3 text-left text-sm transition-colors'
 
 function Entry({
   active,
