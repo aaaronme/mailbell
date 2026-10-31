@@ -31,6 +31,8 @@ export type LabelMenu = 'label' | 'move' | null
 
 const route = getRouteApi('/mail')
 
+const SCROLL_KEYS = new Set([' ', 'PageDown', 'PageUp', 'ArrowDown', 'ArrowUp', 'Home', 'End'])
+
 export function ReadingPane({
   actions,
   engage,
@@ -144,14 +146,18 @@ export function ReadingPane({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      {/* The scroller engages on its own scroll too: ThreadView only hears
-          scrolls of what it contains. */}
+      {/* Keyed by thread: each one starts at the top with its own collapse
+          state. Only the reader's own input engages; a scroll event alone
+          also fires when a shorter thread clamps the position. */}
       <div
+        key={url}
         ref={scrollRef}
         tabIndex={-1}
         data-testid="reading-scroll"
         className="min-h-0 flex-1 overflow-y-auto outline-none"
-        onScroll={engage}
+        onWheel={engage}
+        onPointerDown={engage}
+        onKeyDown={(e) => SCROLL_KEYS.has(e.key) && engage()}
       >
         {open.data ? (
           <ThreadView thread={open.data} onEngage={engage} replyRef={replyRef} shortcuts={false} />

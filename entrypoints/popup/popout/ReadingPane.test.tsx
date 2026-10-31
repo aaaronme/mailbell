@@ -21,6 +21,8 @@ const A = 'a@example.com'
 const B = 'b@example.com'
 let threadLabels = ['INBOX', 'UNREAD']
 let labels: object[] = []
+// Thread id -> how many messages it has; one otherwise.
+let sizes: Record<string, number> = {}
 
 const json = (body: object) => new Response(JSON.stringify(body))
 
@@ -37,15 +39,13 @@ function stubFetch() {
         return json({
           id,
           snippet: 's',
-          messages: [
-            {
-              id: `m${id}`,
-              labelIds: threadLabels,
-              snippet: 's',
-              internalDate: String(Date.now()),
-              payload: { headers: [{ name: 'From', value: 'Bob <bob@example.org>' }, { name: 'Subject', value: id }] },
-            },
-          ],
+          messages: Array.from({ length: sizes[id] ?? 1 }, (_, n) => ({
+            id: `m${id}-${n}`,
+            labelIds: threadLabels,
+            snippet: 's',
+            internalDate: String(Date.now() - (10 - n) * 60_000),
+            payload: { headers: [{ name: 'From', value: 'Bob <bob@example.org>' }, { name: 'Subject', value: id }] },
+          })),
         })
       }
       if (path === '/labels') return json({ labels: asB ? [{ id: 'Label_B', name: 'Clients', type: 'user' }] : labels })
@@ -88,6 +88,7 @@ describe('ReadingPane', () => {
     })
     setTokenSource(async (account) => account)
     threadLabels = ['INBOX', 'UNREAD']
+    sizes = {}
     labels = [
       { id: 'INBOX', name: 'INBOX', type: 'system' },
       { id: 'Label_1', name: 'Work', type: 'user' },
@@ -161,13 +162,61 @@ describe('ReadingPane', () => {
     await expect.element(screen.getByTitle('Unstar (s)')).toBeInTheDocument()
   })
 
-  it('marks read when its scroll container scrolls', async () => {
+  it('marks read when the reader wheels or keys through its scroll container', async () => {
     await browser.storage.local.set({ settings: { markRead: 'delay' } })
-    await mount(at('INBOX', 't1'))
+    const { router } = await mount(at('INBOX', 't1'))
     await vi.waitFor(() => expect(pane().textContent).toContain('Bob'))
+    const scroller = () => pane().querySelector<HTMLElement>('[data-testid="reading-scroll"]')!
+    // A scroll the reader didn't make (layout clamping, a remount) is not reading.
+    scroller().dispatchEvent(new Event('scroll'))
+    await new Promise((r) => setTimeout(r, 50))
     expect(runSilent).not.toHaveBeenCalled()
-    pane().querySelector('[data-testid="reading-scroll"]')!.dispatchEvent(new Event('scroll'))
+    scroller().dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 40 }))
     await vi.waitFor(() => expect(runSilent).toHaveBeenCalledWith({ kind: 'read' }, expect.any(Array)))
+    vi.mocked(runSilent).mockClear()
+    const first = scroller()
+    await router.navigate({ to: '/mail', search: { account: A, folder: 'INBOX', cat: 'primary', thread: threadUrl(A, 't2') } })
+    await vi.waitFor(() => expect(scroller() !== first && scroller().textContent!.includes('Bob')).toBe(true))
+    scroller().dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'PageDown' }))
+    await vi.waitFor(() =>
+      expect(runSilent).toHaveBeenCalledWith({ kind: 'read' }, [{ account: A, threadId: 't2', url: threadUrl(A, 't2') }]),
+    )
+  })
+
+  it('starts every cached thread afresh: newest expanded, at the top, unread', async () => {
+    await browser.storage.local.set({ settings: { markRead: 'delay' } })
+    sizes = { t1: 6, t2: 3 }
+    await page.viewport(1200, 800)
+    window.location.hash = `#/mail?${at('INBOX', 't1')}`
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const router = createAppRouter([`/mail?${at('INBOX', 't1')}`], { popout: true })
+    await render(
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    )
+    const go = (id: string) =>
+      router.navigate({ to: '/mail', search: { account: A, folder: 'INBOX', cat: 'primary', thread: threadUrl(A, id) } })
+    const messages = () => [...pane().querySelectorAll('[data-testid="mail-message"]')]
+    const scroller = () => pane().querySelector<HTMLElement>('[data-testid="reading-scroll"]')!
+    await vi.waitFor(() => expect(client.getQueryData(['mail', 'thread', A, 't2'])).toBeDefined())
+    const started = Date.now()
+    for (const [id, shown] of [['t1', 3], ['t2', 3], ['t1', 3], ['t2', 3]] as const) {
+      await go(id)
+      await vi.waitFor(() => expect(messages()).toHaveLength(shown))
+      // The newest message is open, not a collapsed row or a group stub.
+      expect(messages().at(-1)!.getAttribute('role')).toBeNull()
+      expect(!!pane().querySelector('[data-testid="collapsed-indicator"]')).toBe(id === 't1')
+      expect(scroller().scrollTop).toBe(0)
+      // Scrolled down before leaving, so a kept position would show.
+      // Inline, as the tests run without the stylesheet.
+      Object.assign(scroller().style, { maxHeight: '100px', overflowY: 'auto' })
+      scroller().scrollTop = scroller().scrollHeight
+      expect(scroller().scrollTop).toBeGreaterThan(0)
+      await new Promise((r) => requestAnimationFrame(() => r(null)))
+    }
+    expect(Date.now() - started).toBeLessThan(2000)
+    expect(runSilent).not.toHaveBeenCalled()
   })
 
   it('labels checked rows with their own account labels in All inboxes', async () => {
