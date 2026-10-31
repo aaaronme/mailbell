@@ -27,3 +27,5 @@ web-ext.config.ts
 *.sln
 *.sw?
 !.env.example
+
+.superpowers/
