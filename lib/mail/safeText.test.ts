@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { safeText } from './safeText'
+import { safeParts, safeText } from './safeText'
 
 describe('safeText', () => {
   it('shows where a link really goes, and no markup', () => {
@@ -26,5 +26,15 @@ describe('safeText', () => {
 
   it('breaks lines at blocks', () => {
     expect(safeText('<div>one</div><p>two</p>a<br>b<script>x()</script>')).toBe('one\ntwo\na\nb')
+  })
+
+  it('keeps each full url beside its short form', () => {
+    const long = 'https://a.com/c/' + 'x'.repeat(50)
+    expect(safeParts(`<p>Hi <a href="${long}">there</a>, see ${long}</p>`)).toEqual([
+      'Hi there (',
+      { text: 'a.com/…', href: long },
+      '), see ',
+      { text: 'a.com/…', href: long },
+    ])
   })
 })
