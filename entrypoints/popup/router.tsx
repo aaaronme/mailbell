@@ -1,5 +1,6 @@
 import {
-  createRootRoute,
+  createRootRouteWithContext,
+  createHashHistory,
   createRoute,
   createRouter,
   createMemoryHistory,
@@ -14,6 +15,9 @@ import { DebugLogPage } from './pages/DebugLogPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { fetchMailQuery, mailQueryKey } from '@/lib/useMailQuery'
 import { queryClient } from '@/lib/queryClient'
+import { MailRoute } from './popout/MailRoute'
+import { validateMailSearch } from './popout/mailSearch'
+import { isPopoutTab } from './view'
 
 function RootComponent() {
   // The router's own `scrollRestoration: true` option didn't actually reset
@@ -30,13 +34,17 @@ function RootComponent() {
   return <Outlet />
 }
 
-const rootRoute = createRootRoute({
+const rootRoute = createRootRouteWithContext<{ popout: boolean }>()({
   component: RootComponent,
 })
 
 export const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
+  // The popout has no list-of-accounts page; its home is the mail client.
+  beforeLoad: ({ context }) => {
+    if (context.popout) throw redirect({ to: '/mail', search: validateMailSearch({}) })
+  },
   component: IndexPage,
 })
 
@@ -93,23 +101,36 @@ export const settingsRoute = createRoute({
   component: SettingsPage,
 })
 
-const routeTree = rootRoute.addChildren([indexRoute, detailRoute, debugRoute, settingsRoute])
+export const mailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/mail',
+  validateSearch: validateMailSearch,
+  component: MailRoute,
+})
+
+const routeTree = rootRoute.addChildren([indexRoute, detailRoute, debugRoute, settingsRoute, mailRoute])
 
 // A factory rather than exporting one fixed instance: tests need their own
 // router with a specific starting location (e.g. straight into
 // /detail/$threadUrl) without disturbing the app's singleton below.
-export function createAppRouter(initialEntries: string[] = ['/']) {
+export function createAppRouter(initialEntries: string[] = ['/'], opts: { popout?: boolean } = {}) {
+  const popout = opts.popout ?? false
   return createRouter({
     routeTree,
-    // Memory history, not browser/hash history: this is a popup window, not
-    // a navigable page with a URL bar - there's nothing for browser history
-    // to reflect, and no reason to round-trip navigation through it.
-    history: createMemoryHistory({ initialEntries }),
+    context: { popout },
+    // Memory history in the popup, not browser/hash history: it's a popup
+    // window, not a navigable page with a URL bar - there's nothing for
+    // browser history to reflect, and no reason to round-trip navigation
+    // through it. The popout is a real tab, so its hash keeps the view across
+    // a reload.
+    history: popout ? createHashHistory() : createMemoryHistory({ initialEntries }),
   })
 }
 
 // ?page= opens a tab straight on a route (the sound picker in Settings needs a real tab).
-export const router = createAppRouter([new URLSearchParams(location.search).get('page') ?? '/'])
+export const router = createAppRouter([new URLSearchParams(location.search).get('page') ?? '/'], {
+  popout: isPopoutTab,
+})
 
 declare module '@tanstack/react-router' {
   interface Register {

@@ -1,0 +1,92 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { render } from 'vitest-browser-react'
+import { page } from 'vitest/browser'
+import { fakeBrowser } from '@webext-core/fake-browser'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { RouterProvider } from '@tanstack/react-router'
+import { threadUrl } from '@/lib/api/gmail'
+
+vi.stubGlobal('browser', fakeBrowser)
+vi.stubGlobal('chrome', fakeBrowser)
+
+const { createAppRouter } = await import('../router')
+
+const THREAD = threadUrl('a@example.com', 'abc')
+
+// Tailwind is not loaded in tests, so the empty placeholders have no size:
+// presence, not visibility, tells the panes apart.
+
+// Hash history reads the page's own location, so the start is set there.
+async function mount(hash: string) {
+  window.location.hash = hash
+  const router = createAppRouter([hash.slice(1)], { popout: true })
+  const screen = await render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  )
+  return { router, screen }
+}
+
+describe('MailRoute', () => {
+  beforeEach(() => {
+    fakeBrowser.reset()
+    vi.spyOn(fakeBrowser.identity, 'getRedirectURL').mockReturnValue('https://x.extensions.allizom.org/')
+  })
+
+  it('shows all three panes on a wide viewport', async () => {
+    await page.viewport(1200, 800)
+    const { screen } = await mount('#/mail')
+    await expect.element(screen.getByTestId('sidebar')).toBeInTheDocument()
+    await expect.element(screen.getByTestId('thread-list')).toBeInTheDocument()
+    await expect.element(screen.getByTestId('reading-pane')).toBeInTheDocument()
+  })
+
+  it('hides the sidebar behind a toggle below 1000px', async () => {
+    await page.viewport(900, 800)
+    const { screen } = await mount('#/mail')
+    await expect.element(screen.getByTestId('thread-list')).toBeInTheDocument()
+    await expect.element(screen.getByTestId('sidebar')).not.toBeInTheDocument()
+    await screen.getByTitle('Show sidebar').click()
+    await expect.element(screen.getByTestId('sidebar')).toBeInTheDocument()
+  })
+
+  it('is single-pane below 700px, and Back clears the thread', async () => {
+    await page.viewport(600, 800)
+    const { screen, router } = await mount(`#/mail?thread=${encodeURIComponent(THREAD)}`)
+    await expect.element(screen.getByTestId('reading-pane')).toBeInTheDocument()
+    await expect.element(screen.getByTestId('thread-list')).not.toBeInTheDocument()
+    await screen.getByTitle('Back').click()
+    await expect.element(screen.getByTestId('thread-list')).toBeInTheDocument()
+    await expect.element(screen.getByTestId('reading-pane')).not.toBeInTheDocument()
+    expect(router.state.location.search.thread).toBeUndefined()
+  })
+
+  it('reads a thread url containing ? and # back intact under hash history', async () => {
+    await page.viewport(1200, 800)
+    const { router } = await mount('#/mail')
+    await router.navigate({ to: '/mail', search: { account: 'all', folder: 'INBOX', thread: THREAD } })
+    expect(THREAD).toContain('#inbox/abc')
+    expect(router.state.location.search.thread).toBe(THREAD)
+    expect(window.location.hash.startsWith('#/mail')).toBe(true)
+    expect(window.location.hash.indexOf('#', 1)).toBe(-1)
+  })
+
+  it('redirects / to /mail in the popout', async () => {
+    await page.viewport(1200, 800)
+    const { router } = await mount('#/')
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe('/mail'))
+  })
+
+  it('leaves the popup router on the index page', async () => {
+    await page.viewport(1200, 800)
+    const router = createAppRouter(['/'])
+    await render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    )
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe('/'))
+    expect(document.querySelector('[data-testid="sidebar"]')).toBeNull()
+  })
+})
