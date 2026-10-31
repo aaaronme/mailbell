@@ -1,13 +1,11 @@
 import { useState } from 'react'
-import { useQueries } from '@tanstack/react-query'
 import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import { ChevronDownIcon, ChevronRightIcon, PlusIcon, SettingsIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { addAccount } from '@/lib/accounts'
 import { OAuthError } from '@/lib/auth/oauth'
 import { useAccounts } from '@/lib/useAccounts'
-import type { GmailLabel } from '@/lib/api/mailbox'
-import { labelsOptions, useLabels } from '@/lib/mail/queries'
+import { useLabels, useSummedLabels } from '@/lib/mail/queries'
 import { labelTree, SYSTEM_FOLDERS, type LabelNode } from '@/lib/mail/folders'
 import { cn } from '@/lib/utils'
 import { validateMailSearch } from './mailSearch'
@@ -16,9 +14,6 @@ const route = getRouteApi('/mail')
 
 // labels.list carries no counts for the other system folders.
 const COUNTED_SYSTEM = new Set(['INBOX', 'SPAM', 'DRAFT'])
-
-const sumInboxUnread = (results: { data?: GmailLabel[] }[]) =>
-  results.reduce((sum, { data }) => sum + (data?.find((it) => it.id === 'INBOX')?.threadsUnread ?? 0), 0)
 
 const ROW = 'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 px-3 text-left text-sm transition-colors'
 
@@ -63,10 +58,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const search = route.useSearch()
   const navigate = useNavigate({ from: '/mail' })
   const { data: accounts = [] } = useAccounts()
-  const inboxCounts = useQueries({
-    queries: accounts.map(({ email }) => labelsOptions(email)),
-    combine: sumInboxUnread,
-  })
+  const inboxCounts = useSummedLabels(accounts.map((it) => it.email)).find((it) => it.id === 'INBOX')?.threadsUnread
 
   // Dropping q and thread: a new folder starts a fresh list.
   const open = (account: string, folder: string) => {

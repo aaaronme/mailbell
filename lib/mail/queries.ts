@@ -1,6 +1,6 @@
 import { useCallback, useMemo } from 'react'
-import { queryOptions, type InfiniteData, useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { getOpenThread, listLabels, listThreadPage, type ThreadRow } from '../api/mailbox'
+import { queryOptions, type InfiniteData, useInfiniteQuery, useQueries, useQuery } from '@tanstack/react-query'
+import { getOpenThread, listLabels, listThreadPage, type GmailLabel, type ThreadRow } from '../api/mailbox'
 import { parseThreadUrl } from '../api/gmail'
 import type { MailSearch } from './search'
 import { listQuery, type Category } from './folders'
@@ -27,6 +27,30 @@ export const labelsOptions = (account: string) =>
   })
 
 export const useLabels = (account: string) => useQuery(labelsOptions(account))
+
+// What All inboxes counts by: each system label's counts summed over the
+// accounts. User label ids are per account, so they don't add up.
+function sumSystemLabels(results: { data?: GmailLabel[] }[]): GmailLabel[] {
+  const byId = new Map<string, GmailLabel>()
+  for (const label of results.flatMap((it) => it.data ?? [])) {
+    if (label.type !== 'system') continue
+    const had = byId.get(label.id)
+    byId.set(
+      label.id,
+      had
+        ? {
+            ...had,
+            threadsTotal: (had.threadsTotal ?? 0) + (label.threadsTotal ?? 0),
+            threadsUnread: (had.threadsUnread ?? 0) + (label.threadsUnread ?? 0),
+          }
+        : label,
+    )
+  }
+  return [...byId.values()]
+}
+
+export const useSummedLabels = (accounts: string[]) =>
+  useQueries({ queries: accounts.map(labelsOptions), combine: sumSystemLabels })
 
 export interface ThreadListResult {
   rows: ThreadRow[]

@@ -20,7 +20,7 @@ import { registrableDomain } from '@/lib/mail/identity'
 import { useQueries } from '@tanstack/react-query'
 import { correspondentsOptions } from '@/lib/mail/correspondents'
 import { useAccounts } from '@/lib/useAccounts'
-import { useLabels, useThreadList } from '@/lib/mail/queries'
+import { useLabels, useSummedLabels, useThreadList } from '@/lib/mail/queries'
 import { cn } from '@/lib/utils'
 import { ThreadListRow } from './ThreadListRow'
 import type { MailActions } from './useMailActions'
@@ -69,12 +69,15 @@ export function ThreadList({
   const navigate = useNavigate({ from: '/mail' })
   const { account, folder, cat, q, unread, thread } = search
   const { rows, hasNextPage, fetchNextPage, isFetchingNextPage, isPending, error } = useThreadList(search)
-  const labels = useLabels(account).data
   const accounts = useAccounts().data
   const mailboxes = useMemo(
     () => (account === 'all' ? (accounts ?? []).map((it) => it.email) : [account]),
     [account, accounts],
   )
+  const ownLabels = useLabels(account).data
+  // Summed over every account in All inboxes, so its tabs and counts cover them all.
+  const summed = useSummedLabels(account === 'all' ? mailboxes : [])
+  const labels = account === 'all' ? summed : ownLabels
   // Each row is checked against the contacts of the account it arrived in.
   // A stable combine keeps the Sets, and so every row's memo, from changing on each render.
   const combine = useCallback(
@@ -140,6 +143,7 @@ export function ThreadList({
     !q &&
     OPTIONAL_CATEGORIES.some((it) => (labels?.find((l) => l.id === CATEGORY_LABEL[it])?.threadsTotal ?? 0) > 0)
   const folderName =
+    (account === 'all' ? 'All inboxes' : undefined) ??
     SYSTEM_FOLDERS.find((it) => it.id === folder)?.name ??
     labels?.find((it) => it.id === folder)?.name.split('/').at(-1) ??
     folder

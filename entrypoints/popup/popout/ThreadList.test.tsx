@@ -274,6 +274,8 @@ describe('ThreadList in All inboxes', () => {
   let later: Record<string, Record<string, [string, number]>>
   // The accounts whose list call carried a pageToken, in order.
   let pageTokenCalls: string[]
+  // Per account: what labels.list and labels.get answer.
+  let accountLabels: Record<string, ({ id: string } & Record<string, unknown>)[]>
 
   beforeEach(async () => {
     fakeBrowser.reset()
@@ -291,6 +293,7 @@ describe('ThreadList in All inboxes', () => {
     labels = []
     later = {}
     pageTokenCalls = []
+    accountLabels = {}
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string, init?: RequestInit) => {
@@ -319,12 +322,33 @@ describe('ThreadList in All inboxes', () => {
             ],
           })
         }
-        return json({ labels: [] })
+        const own = accountLabels[account] ?? []
+        if (path === '/labels') return json({ labels: own })
+        return json(own.find((it) => it.id === decodeURIComponent(path.replace('/labels/', ''))) ?? {})
       }),
     )
   })
 
   const order = () => [...rows()].map((it) => it.getAttribute('data-row'))
+
+  it('shows the category tabs any account uses, with summed counts, under All inboxes', async () => {
+    inboxes = { [A]: { a1: ['x@example.net', 5] }, [B]: { b1: ['x@example.net', 10] } }
+    const social = (total: number, unread: number) => ({
+      id: 'CATEGORY_SOCIAL',
+      name: 'CATEGORY_SOCIAL',
+      type: 'system',
+      threadsTotal: total,
+      threadsUnread: unread,
+    })
+    accountLabels = {
+      [A]: [social(2, 1), { id: 'CATEGORY_PROMOTIONS', name: 'CATEGORY_PROMOTIONS', type: 'system', threadsTotal: 0 }],
+      [B]: [social(3, 2)],
+    }
+    const { screen } = await mount('account=all&folder=INBOX&cat=primary')
+    await expect.element(screen.getByRole('heading', { name: 'All inboxes' })).toBeInTheDocument()
+    await expect.element(screen.getByRole('tab', { name: /^Social/ })).toBeInTheDocument()
+    expect(screen.getByRole('tab').elements().map((it) => it.textContent)).toEqual(['Primary', 'Social3'])
+  })
 
   it('merges accounts newest first', async () => {
     inboxes = {
