@@ -9,14 +9,30 @@ const BLOCKS = new Set([
 // don't stack blank lines.
 const BREAK = '\u0001'
 
+// Trailing punctuation usually ends the sentence, not the url.
+const BARE_URL = /\bhttps?:\/\/[^\s<>"]+?(?=[.,;:!?)\]]*(?:\s|$))/gi
+
+// Where a link goes, without the tracking path that can run to hundreds of
+// characters: the whole host is what tells a real domain from a lookalike.
+function shortUrl(url: string): string {
+  if (/^mailto:/i.test(url)) return decodeURIComponent(url.slice(7).split('?')[0]!)
+  try {
+    const u = new URL(url)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return url
+    return u.pathname === '/' && !u.search && !u.hash ? u.host : `${u.host}/…`
+  } catch {
+    return url
+  }
+}
+
 function render(node: Node): string {
-  if (node.nodeType === Node.TEXT_NODE) return (node.textContent ?? '').replace(/\s+/g, ' ')
+  if (node.nodeType === Node.TEXT_NODE) return (node.textContent ?? '').replace(/\s+/g, ' ').replace(BARE_URL, shortUrl)
   if (!(node instanceof Element)) return ''
   const tag = node.localName
   if (tag === 'br') return '\n'
   const inner = [...node.childNodes].map(render).join('')
   if (tag === 'a' && node.hasAttribute('href')) {
-    const url = node.getAttribute('href')!
+    const url = shortUrl(node.getAttribute('href')!)
     const text = inner.trim()
     return !text || text === url ? url : `${text} (${url})`
   }

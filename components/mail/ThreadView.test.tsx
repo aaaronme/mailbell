@@ -96,7 +96,7 @@ describe('ThreadView', () => {
   it('spam mail opens as safe text', async () => {
     const view = await renderView(thread({ labels: ['SPAM'], html: '<p><a href="https://evil.ru">Login</a></p>' }))
     await expect.element(view.getByText('This is in Spam')).toBeVisible()
-    await expect.element(view.getByText('Login (https://evil.ru)')).toBeVisible()
+    await expect.element(view.getByText('Login (evil.ru)')).toBeVisible()
     expect(view.container.querySelector('a[href]')).toBeNull()
     await view.getByRole('button', { name: 'Show formatted' }).click()
     await vi.waitFor(() => expect(shadowOf(view.container)?.querySelector('a')?.textContent).toBe('Login'))

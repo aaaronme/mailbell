@@ -203,7 +203,7 @@ export function ProtectedContent(props: {
     return (
       <div className="flex flex-col gap-2">
         <div className="text-xs font-medium">{suspicion.map((it) => REASON_TEXT[it]).join('. ')}</div>
-        <pre className="whitespace-pre-wrap font-sans">{safeText(message.contentHtml)}</pre>
+        <pre className="whitespace-pre-wrap wrap-anywhere font-sans">{safeText(message.contentHtml)}</pre>
         <div>
           <Button size="sm" variant="ghost" onClick={() => setFormatted(true)}>
             Show formatted
