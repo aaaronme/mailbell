@@ -1,15 +1,30 @@
 # Mailbell for Gmail
 
-A Firefox and Chrome toolbar extension that tells you when new Gmail arrives and lets you read, archive, delete or unsubscribe without opening Gmail.
+**A private, open-source Gmail notifier and reader for Firefox and Chrome.** It tells you when new Gmail arrives and lets you read, reply, archive, delete or unsubscribe without opening Gmail.
+
+[Website](https://aaaronme.github.io/mailbell/) · [Features](https://aaaronme.github.io/mailbell/features) · [FAQ](https://aaaronme.github.io/mailbell/faq) · [Privacy policy](https://aaaronme.github.io/mailbell/privacy) · [Download](https://github.com/aaaronme/mailbell/releases)
+
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE.md) ![Firefox 140+](https://img.shields.io/badge/Firefox-140%2B-orange) ![Chrome 120+](https://img.shields.io/badge/Chrome-120%2B-green)
 
 Mailbell signs in with Google OAuth and talks to the official [Gmail API](https://developers.google.com/gmail/api). It never reads your Gmail cookies or scrapes the Gmail web page.
+
+## Why Mailbell
+
+- **No server, no tracking.** Mail goes only between your browser and Google. No analytics, no telemetry, no account to create.
+- **Tracking pixels blocked.** Remote images stay hidden until you allow them, so senders can't see when you read their mail.
+- **Phishing warnings.** Spam, mail that fails sender checks, spoofed names and lookalike domains open as plain text, every link shown in full.
+- **Fast.** Notifications, a three-pane mail client in a tab and Gmail's keyboard shortcuts, for several accounts at once.
+- **Open source** under GPL-3.0, and free.
 
 ## Features
 
 - Desktop notifications for new unread mail in your inbox: for all mail, Primary only or Important only, with quiet hours, and on or off per account.
 - A notification sound per account: four built-in sounds or your own file (Firefox).
 - Several Google accounts side by side.
-- Read whole threads in the popup, including HTML mail, inline images and attachments, with automatic dark mode.
+- Read whole threads in the popup, including HTML mail, inline images and attachments.
+- A full mail client in a tab: accounts, folders and labels, All inboxes, search, category tabs and a reading pane.
+- Remote images and tracking pixels blocked until you allow them; phishing-style mail opens as safe plain text.
+- Themes: light, dark or system, in any colour or a two-colour gradient.
 - Archive, delete, mark as read or unread, or report spam, for one thread or in bulk.
 - Quick reply and reply all from the opened thread, in plain text.
 - Meeting invites and video-call links (Google Meet, Zoom, Teams, Webex): join in one click, or add the event to Google Calendar.

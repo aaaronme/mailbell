@@ -1,0 +1,22 @@
+title: Mailbell for Gmail
+description: A private, open-source Gmail notifier and reader for Firefox and Chrome. No server, no tracking; your mail goes only between your browser and Google.
+url: https://aaaronme.github.io
+baseurl: /mailbell
+lang: en
+logo: /assets/icon.png
+author: aaaronme
+github_url: https://github.com/aaaronme/mailbell
+
+plugins:
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
+defaults:
+  - scope: { path: '' }
+    values: { layout: default }
+
+# Repo docs that aren't pages for users.
+exclude:
+  - superpowers
+  - RELEASING.md
+  - STORE_LISTING.md

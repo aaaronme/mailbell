@@ -1,0 +1,47 @@
+---
+title: Frequently asked questions
+description: Answers about Mailbell for Gmail - privacy, cost, supported browsers, the Google sign-in warning, permissions and how to remove your data.
+permalink: /faq
+faq:
+  - q: Is Mailbell free?
+    a: Yes. Mailbell is free and open source under the GPL-3.0 licence, with no ads, subscriptions or paid tier.
+  - q: Does Mailbell read or store my email on a server?
+    a: No. Mailbell has no server. It talks to the official Gmail API directly from your browser, and your sign-in tokens, settings and a cache of recent mail stay in your browser's extension storage on your device. The developer never receives your mail.
+  - q: Does Mailbell collect analytics or telemetry?
+    a: No. Mailbell contains no analytics, advertising or telemetry of any kind.
+  - q: Which browsers does Mailbell work in?
+    a: Firefox 140 and newer, and Chrome 120 and newer. Other Chromium browsers such as Edge and Brave can install it from the Chrome Web Store.
+  - q: Does it work with Google Workspace accounts?
+    a: Yes, if your Workspace administrator allows third-party apps to access Gmail. You can add several Gmail and Workspace accounts at once.
+  - q: Why does Google show a "Google hasn't verified this app" warning?
+    a: Google reviews apps that read Gmail in a long, paid process. Until Mailbell completes it, sign-in shows that warning. Choose Advanced, then continue to Mailbell. Mailbell is open source, so you can check exactly what it does with the access.
+  - q: What permissions does Mailbell ask for, and why?
+    a: The Gmail scope gmail.modify, which lets it read your mail, change labels (read, archive, spam, trash) and send the replies you write. It cannot delete mail permanently. In the browser it asks for notifications, storage, alarms, idle (to pause checking while your screen is locked), context menus (the toolbar button's menu), and identity for Google sign-in.
+  - q: Does Mailbell block tracking pixels?
+    a: Yes. Remote images, which senders use to see when you open their mail, stay hidden until you allow them for that mail or that sender. You can also choose to show them always, or only from people you have written to.
+  - q: How does Mailbell protect me from phishing?
+    a: It shows the sender's domain as verified by Gmail's own checks, and opens mail in Spam, mail that fails sender checks, names that show a different address and lookalike domains as plain text with every link's full address visible.
+  - q: How do I remove my data?
+    a: Remove the account in Mailbell's settings, which deletes its data from your browser and revokes Mailbell's access with Google. Uninstalling Mailbell deletes everything it stored. You can also revoke access at myaccount.google.com/permissions.
+  - q: Can I use my own Google Cloud OAuth client?
+    a: Yes. Under Settings, Google OAuth client, paste your own client's ID and secret. The setup guide walks you through creating one.
+---
+
+<h1>Frequently asked questions</h1>
+
+{% for item in page.faq %}
+<h3>{{ item.q }}</h3>
+<p>{{ item.a }}</p>
+{% endfor %}
+
+<p>Something else? <a href="{{ site.github_url }}/issues">Ask on GitHub</a>.</p>
+
+<script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {% for item in page.faq %}{ "@type": "Question", "name": {{ item.q | jsonify }}, "acceptedAnswer": { "@type": "Answer", "text": {{ item.a | jsonify }} } }{% unless forloop.last %},{% endunless %}{% endfor %}
+    ]
+  }
+</script>

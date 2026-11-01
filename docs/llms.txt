@@ -1,0 +1,21 @@
+# Mailbell for Gmail
+
+> Mailbell is a free, open-source (GPL-3.0) browser extension for Firefox and Chrome that notifies you of new Gmail and lets you read, reply, archive, delete and unsubscribe from the toolbar. It has no server, analytics or telemetry: it uses the official Gmail API directly from the browser, and tokens and cached mail stay on the user's device.
+
+Key facts:
+
+- Browsers: Firefox 140+, Chrome 120+ (and Chromium browsers such as Edge and Brave).
+- Accounts: any number of Gmail and Google Workspace accounts.
+- Access: the Gmail API scope gmail.modify (read mail, change labels, send replies the user writes); it cannot delete mail permanently.
+- Privacy: no server between the user and Google; remote images and tracking pixels are blocked by default; phishing-style mail (Spam, failed sender checks, spoofed names, lookalike domains) opens as plain text.
+- Features: notifications per account with quiet hours and sounds, a three-pane mail client in a tab, All inboxes, Gmail search and category tabs, undoable actions, Gmail keyboard shortcuts, one-click unsubscribe (RFC 8058), one-time-code copying, meeting join links, light/dark themes with custom colours.
+- Cost: free, no ads or paid tier.
+
+## Pages
+
+- [Home](https://aaaronme.github.io/mailbell/): what Mailbell is
+- [Features](https://aaaronme.github.io/mailbell/features): the full feature list
+- [Compare](https://aaaronme.github.io/mailbell/compare): Mailbell against a Gmail tab, cookie-based notifiers and desktop mail apps
+- [FAQ](https://aaaronme.github.io/mailbell/faq): privacy, permissions, browsers, the unverified-app warning
+- [Privacy policy](https://aaaronme.github.io/mailbell/privacy)
+- [Source code](https://github.com/aaaronme/mailbell)

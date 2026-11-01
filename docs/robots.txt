@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://aaaronme.github.io/mailbell/sitemap.xml
