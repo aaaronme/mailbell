@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f6f6f6" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#00111b" media="(prefers-color-scheme: dark)" />
     {% seo %}
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
     <link rel="icon" href="{{ '/assets/favicon.png' | relative_url }}" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      rel="stylesheet"
-      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=Source+Serif+4:opsz,wght@8..60,500&display=swap"
-    />
+    <link rel="apple-touch-icon" href="{{ '/assets/icon.png' | relative_url }}" />
     <link rel="stylesheet" href="{{ '/assets/site.css' | relative_url }}" />
     {% if page.schema %}<script type="application/ld+json">{{ page.schema | jsonify }}</script>{% endif %}
   </head>
@@ -29,13 +29,13 @@
       </div>
     </header>
     <main>
-      <div class="wrap">{{ content }}</div>
+      <div class="wrap{% if page.path contains '.md' %} prose{% endif %}">{{ content }}</div>
     </main>
     <footer class="site">
       <div class="wrap">
-        <span>Mailbell is free and open source (GPL-3.0).</span>
+        <span>Free and open source, GPL-3.0</span>
         <a href="{{ site.github_url }}">GitHub</a>
-        <a href="{{ '/privacy' | relative_url }}">Privacy policy</a>
+        <a href="{{ '/privacy' | relative_url }}">Privacy</a>
         <a href="{{ site.github_url }}/issues">Support</a>
       </div>
     </footer>

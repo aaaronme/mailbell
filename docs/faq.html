@@ -2,6 +2,7 @@
 title: Frequently asked questions
 description: Answers about Mailbell for Gmail - privacy, cost, supported browsers, the Google sign-in warning, permissions and how to remove your data.
 permalink: /faq
+image: { path: /assets/og/faq.png, alt: Mailbell FAQ }
 faq:
   - q: Is Mailbell free?
     a: Yes. Mailbell is free and open source under the GPL-3.0 licence, with no ads, subscriptions or paid tier.
@@ -27,14 +28,19 @@ faq:
     a: Yes. Under Settings, Google OAuth client, paste your own client's ID and secret. The setup guide walks you through creating one.
 ---
 
-<h1>Frequently asked questions</h1>
+<h1>Questions and answers</h1>
+<p class="lead">About privacy, permissions, browsers and signing in.</p>
 
+<div style="margin-top: 40px">
 {% for item in page.faq %}
-<h3>{{ item.q }}</h3>
-<p>{{ item.a }}</p>
+<details id="q{{ forloop.index }}">
+  <summary>{{ item.q }}</summary>
+  <p>{{ item.a }}</p>
+</details>
 {% endfor %}
+</div>
 
-<p>Something else? <a href="{{ site.github_url }}/issues">Ask on GitHub</a>.</p>
+<p style="margin-top: 32px">Something else? <a href="{{ site.github_url }}/issues">Ask on GitHub</a>.</p>
 
 <script type="application/ld+json">
   {

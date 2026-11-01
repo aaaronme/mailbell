@@ -2,6 +2,7 @@
 title: Privacy policy
 description: Mailbell has no server and collects nothing. What it accesses in Gmail, where your data goes, and how to remove it.
 permalink: /privacy
+image: { path: /assets/og/privacy.png, alt: Mailbell privacy policy }
 ---
 
 # Privacy policy

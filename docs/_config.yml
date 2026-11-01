@@ -3,6 +3,8 @@ description: A private, open-source Gmail notifier and reader for Firefox and Ch
 url: https://aaaronme.github.io
 baseurl: /mailbell
 lang: en
+locale: en_US
+twitter: { card: summary_large_image }
 logo: /assets/icon.png
 author: aaaronme
 github_url: https://github.com/aaaronme/mailbell
@@ -13,7 +15,7 @@ plugins:
 
 defaults:
   - scope: { path: '' }
-    values: { layout: default }
+    values: { layout: default, image: { path: /assets/og/home.png, alt: Mailbell for Gmail } }
 
 # Repo docs that aren't pages for users.
 exclude:

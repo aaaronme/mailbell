@@ -1,12 +1,14 @@
-/* The extension's palette (entrypoints/popup/style.css): light by default,
-   OrderX navy in dark. */
+/* The extension's palette (entrypoints/popup/style.css), with the system
+   font: no web fonts, so the site makes no third-party requests. */
 :root {
   --bg: #f6f6f6;
   --card: #ffffff;
   --fg: #0c0c0d;
-  --muted: rgb(12 12 13 / 0.6);
+  --text: rgb(12 12 13 / 0.82);
+  --muted: rgb(12 12 13 / 0.56);
   --line: rgb(12 12 13 / 0.1);
   --bell: #087f8c;
+  --header: rgb(246 246 246 / 0.8);
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
@@ -14,183 +16,306 @@
     --bg: #00111b;
     --card: #021b27;
     --fg: #ffffff;
-    --muted: rgb(255 255 255 / 0.6);
+    --text: rgb(255 255 255 / 0.82);
+    --muted: rgb(255 255 255 / 0.56);
     --line: rgb(255 255 255 / 0.1);
     --bell: #7cd0e8;
+    --header: rgb(0 17 27 / 0.8);
   }
 }
 
 * {
   box-sizing: border-box;
 }
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-padding-top: 72px;
+}
 body {
   margin: 0;
   background: var(--bg);
-  color: var(--fg);
-  font: 16px/1.6 'Geist', ui-sans-serif, system-ui, sans-serif;
+  color: var(--text);
+  font:
+    17px/1.65 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    system-ui,
+    sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 a {
-  color: inherit;
-  text-decoration-color: var(--line);
-  text-underline-offset: 3px;
+  color: var(--bell);
+  text-decoration: none;
 }
 a:hover {
-  text-decoration-color: currentColor;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+strong {
+  color: var(--fg);
+  font-weight: 600;
+}
+code {
+  font: 0.88em ui-monospace, 'SF Mono', Menlo, monospace;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--line);
+  color: var(--fg);
 }
 
 .wrap {
-  max-width: 760px;
+  max-width: 720px;
   margin: 0 auto;
   padding: 0 16px;
 }
 
+/* Header: stays put while reading, the page shows faintly through it. */
 header.site {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--header);
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
   border-bottom: 1px solid var(--line);
 }
 header.site .wrap {
   display: flex;
   align-items: center;
-  gap: 16px;
-  height: 56px;
+  gap: 20px;
+  height: 52px;
 }
 header.site .brand {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 500;
-  text-decoration: none;
   margin-right: auto;
-}
-header.site .brand img {
-  width: 24px;
-  height: 24px;
+  color: var(--fg);
+  font-weight: 600;
+  text-decoration: none;
 }
 header.site nav {
   display: flex;
-  gap: 16px;
-  font-size: 14px;
-  color: var(--muted);
+  gap: 20px;
+  font-size: 15px;
   overflow-x: auto;
 }
 header.site nav a {
-  text-decoration: none;
+  color: var(--muted);
   white-space: nowrap;
+  text-decoration: none;
 }
+header.site nav a:hover,
 header.site nav a[aria-current='page'] {
   color: var(--fg);
 }
 
 main {
-  padding: 48px 0 64px;
+  padding: 56px 0 88px;
 }
 h1,
-h2 {
-  font-family: 'Source Serif 4', Georgia, serif;
-  font-weight: 500;
-  line-height: 1.2;
+h2,
+h3 {
+  color: var(--fg);
+  font-weight: 600;
+  letter-spacing: -0.015em;
 }
 h1 {
-  font-size: clamp(32px, 6vw, 44px);
+  font-size: clamp(34px, 7vw, 48px);
+  line-height: 1.1;
+  letter-spacing: -0.025em;
   margin: 0 0 16px;
 }
 h2 {
-  font-size: 24px;
-  margin: 48px 0 12px;
+  font-size: 26px;
+  line-height: 1.25;
+  margin: 0 0 8px;
 }
 h3 {
-  font-size: 16px;
-  font-weight: 500;
-  margin: 24px 0 4px;
+  font-size: 17px;
+  margin: 28px 0 4px;
 }
-p,
+p {
+  margin: 0 0 16px;
+}
+ul {
+  padding-left: 20px;
+}
 li {
-  color: var(--muted);
-}
-strong {
-  color: var(--fg);
-  font-weight: 500;
+  margin: 6px 0;
 }
 .lead {
-  font-size: 18px;
+  font-size: 20px;
+  line-height: 1.5;
+  color: var(--muted);
   max-width: 600px;
 }
 
+/* Each section starts below a hairline, with room around it, so the page
+   reads as a sequence of short chapters. */
+section {
+  padding-top: 40px;
+  margin-top: 48px;
+  border-top: 1px solid var(--line);
+}
+section > p:first-of-type {
+  color: var(--muted);
+}
+
+.hero img {
+  display: block;
+  width: 72px;
+  height: 72px;
+  margin-bottom: 24px;
+}
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 24px 0 0;
+  gap: 10px;
+  margin-top: 28px;
 }
 .button {
-  display: inline-block;
-  padding: 8px 16px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  font-size: 14px;
-  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  height: 42px;
+  padding: 0 18px;
+  border-radius: 21px;
+  background: var(--line);
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 600;
   text-decoration: none;
+}
+.button:hover {
+  text-decoration: none;
+  opacity: 0.85;
 }
 .button.primary {
   background: var(--fg);
   color: var(--bg);
-  border-color: var(--fg);
+}
+.note {
+  margin-top: 12px;
+  font-size: 14px;
+  color: var(--muted);
 }
 
-.grid {
+/* A list of points: a short name, then a sentence. Two columns when there's
+   room, one on a phone. */
+.points {
+  margin: 24px 0 0;
+}
+.points > div {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 12px;
-  margin-top: 16px;
+  grid-template-columns: 200px 1fr;
+  gap: 4px 24px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
 }
-.card {
-  background: var(--card);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 16px;
+.points > div:last-child {
+  border-bottom: 0;
 }
-.card h3 {
-  margin-top: 0;
+.points dt {
+  color: var(--fg);
+  font-weight: 600;
 }
-.card p {
+.points dd {
   margin: 0;
-  font-size: 14px;
+}
+@media (max-width: 600px) {
+  .points > div {
+    grid-template-columns: 1fr;
+  }
 }
 
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-  margin-top: 16px;
+/* FAQ: native disclosure, one question per row. */
+details {
+  border-bottom: 1px solid var(--line);
 }
+details:first-of-type {
+  border-top: 1px solid var(--line);
+}
+summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 0;
+  color: var(--fg);
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+summary::-webkit-details-marker {
+  display: none;
+}
+summary::after {
+  content: '+';
+  color: var(--muted);
+  font-weight: 400;
+}
+details[open] summary::after {
+  content: '−';
+}
+details p {
+  margin: -4px 0 18px;
+}
+
+/* Compare: the row names stay visible while the table scrolls sideways. */
 .table {
   overflow-x: auto;
+  margin: 32px -16px 0;
+  padding: 0 16px;
+}
+table {
+  border-collapse: collapse;
+  font-size: 15px;
+  min-width: 640px;
 }
 th,
 td {
   text-align: left;
-  padding: 8px;
-  border-bottom: 1px solid var(--line);
   vertical-align: top;
+  padding: 12px 12px 12px 0;
+  border-bottom: 1px solid var(--line);
 }
-th {
-  font-weight: 500;
-}
-td {
+thead th {
   color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
 }
-.yes {
-  color: var(--bell);
+tbody th {
+  position: sticky;
+  left: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-weight: 600;
+  width: 180px;
+}
+td.yes,
+thead th.yes {
+  color: var(--fg);
 }
 
 footer.site {
   border-top: 1px solid var(--line);
-  padding: 24px 0;
+  padding: 28px 0 40px;
   font-size: 14px;
   color: var(--muted);
 }
 footer.site .wrap {
   display: flex;
   flex-wrap: wrap;
-  gap: 16px;
+  gap: 8px 20px;
+}
+footer.site span {
+  margin-right: auto;
+}
+footer.site a {
+  color: var(--muted);
+}
+
+/* The privacy policy and setup guide are Markdown: give their headings
+   the section rhythm too. */
+.prose h2 {
+  margin-top: 48px;
 }
