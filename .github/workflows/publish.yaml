@@ -13,6 +13,10 @@ on:
       tag:
         description: Release tag to publish, like v1.0.2
         required: true
+      dry_run:
+        description: Only check the store logins, upload nothing
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -33,20 +37,20 @@ jobs:
       FIREFOX_JWT_ISSUER: ${{ secrets.FIREFOX_JWT_ISSUER }}
       FIREFOX_JWT_SECRET: ${{ secrets.FIREFOX_JWT_SECRET }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.TAG }}
-      - uses: pnpm/action-setup@v4
+      # The publisher runs at a fixed version, not the tag's lockfile: 6.2.0
+      # is the first to name the sources zip it uploads, which AMO requires.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: gh release download "$TAG" --dir .output
+      - run: gh release download "$TAG" --dir .output -R "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ github.token }}
       - name: Submit
+        env:
+          DRY_RUN: ${{ inputs.dry_run || false }}
         run: |
+          # A key copied from the JSON key file keeps its line breaks as "\n".
+          export CHROME_SERVICE_ACCOUNT_PRIVATE_KEY="${CHROME_SERVICE_ACCOUNT_PRIVATE_KEY//\\n/$'\n'}"
           version="${TAG#v}"
           args=()
           if [ -n "$CHROME_EXTENSION_ID" ] && [ -n "$CHROME_SERVICE_ACCOUNT_PRIVATE_KEY" ]; then
@@ -60,5 +64,6 @@ jobs:
             echo "::warning::AMO secrets not set, skipping Firefox"
           fi
           if [ ${#args[@]} -gt 0 ]; then
-            pnpm wxt submit "${args[@]}"
+            if [ "$DRY_RUN" = true ]; then args+=(--dry-run); fi
+            npx --yes publish-browser-extension@6.2.0 "${args[@]}"
           fi
