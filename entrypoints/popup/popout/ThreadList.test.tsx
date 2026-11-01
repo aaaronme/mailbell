@@ -4,6 +4,7 @@ import { page, userEvent } from 'vitest/browser'
 import { fakeBrowser } from '@webext-core/fake-browser'
 import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
+import { answerBatches } from '@/lib/api/batch.testing'
 
 vi.stubGlobal('browser', fakeBrowser)
 vi.stubGlobal('chrome', fakeBrowser)
@@ -61,7 +62,7 @@ function stubFetch() {
   actionRequests.length = 0
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: string, init?: RequestInit) => {
+    answerBatches(async (input: string, init?: RequestInit) => {
       const url = new URL(input)
       const path = url.pathname.replace(/^.*\/gmail\/v1\/users\/me/, '')
       if (init?.method === 'POST') {
@@ -273,7 +274,7 @@ describe('ThreadList', () => {
     const { screen } = await mount()
     await vi.waitFor(() => expect(rows()).toHaveLength(50))
     const ok = globalThis.fetch
-    vi.stubGlobal('fetch', vi.fn(async (input: string, init?: RequestInit) =>
+    vi.stubGlobal('fetch', answerBatches(async (input: string, init?: RequestInit) =>
       init?.method === 'POST' ? new Response('no', { status: 500 }) : ok(input, init),
     ))
     document.querySelector<HTMLInputElement>('[aria-label="Select Subject 1"]')!.click()
@@ -357,7 +358,7 @@ describe('ThreadList in All inboxes', () => {
     accountLabels = {}
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: string, init?: RequestInit) => {
+      answerBatches(async (input: string, init?: RequestInit) => {
         const url = new URL(input)
         const path = url.pathname.replace(/^.*\/gmail\/v1\/users\/me/, '')
         const account = new Headers(init?.headers).get('Authorization')!.replace('Bearer ', '')

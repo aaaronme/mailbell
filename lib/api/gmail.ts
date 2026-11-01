@@ -157,9 +157,11 @@ function retryDelay(resp: Response): number {
   return Number.isFinite(seconds) && seconds >= 0 ? Math.min(seconds * 1000, RETRY_MAX_MS) : RETRY_DEFAULT_MS
 }
 
-export async function gmailFetch<T>(account: string, path: string, init: RequestInit = {}): Promise<T> {
+// The request with the account's token, retried once on a 401 and once on a
+// rate limit; any other answer is the caller's.
+async function authorizedFetch(account: string, url: string, init: RequestInit): Promise<Response> {
   const send = async (token: string) =>
-    fetch(`${API}${path}`, {
+    fetch(url, {
       ...init,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -180,12 +182,71 @@ export async function gmailFetch<T>(account: string, path: string, init: Request
     await new Promise((r) => setTimeout(r, retryDelay(resp)))
     resp = await send(await tokenSource(account))
   }
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '')
-    throw new GmailApiError(resp.status, `gmail ${init.method ?? 'GET'} ${path}: ${resp.status} ${text.slice(0, 200)}`)
-  }
+  return resp
+}
+
+async function apiError(resp: Response, what: string): Promise<GmailApiError> {
+  const text = await resp.text().catch(() => '')
+  return new GmailApiError(resp.status, `gmail ${what}: ${resp.status} ${text.slice(0, 200)}`)
+}
+
+export async function gmailFetch<T>(account: string, path: string, init: RequestInit = {}): Promise<T> {
+  const resp = await authorizedFetch(account, `${API}${path}`, init)
+  if (!resp.ok) throw await apiError(resp, `${init.method ?? 'GET'} ${path}`)
   return (resp.status === 204 ? undefined : await resp.json()) as T
 }
+
+const BATCH = 'https://gmail.googleapis.com/batch/gmail/v1'
+const BOUNDARY = 'mailbell_batch'
+
+// Each answer of a multipart batch response, by the index its Content-ID carries.
+function batchAnswers(contentType: string, text: string): Map<number, Response> {
+  const answers = new Map<number, Response>()
+  const boundary = /boundary="?([^";\s]+)/i.exec(contentType)?.[1]
+  if (!boundary) return answers
+  for (const part of text.split(`--${boundary}`)) {
+    const id = /Content-ID:\s*<response-item-(\d+)>/i.exec(part)?.[1]
+    const http = /HTTP\/[\d.]+ (\d{3})[^\n]*\n([\s\S]*)/.exec(part)
+    if (!id || !http) continue
+    // The answer's own headers end at its first blank line.
+    const body = http[2]!.split(/\r?\n\r?\n/).slice(1).join('\n\n').trim()
+    answers.set(Number(id), new Response(body || null, { status: Number(http[1]) }))
+  }
+  return answers
+}
+
+// Many GETs in one request: each still costs its own quota, but not its own
+// round trip and token. A rate-limited one is asked again once, as gmailFetch
+// would; whatever still fails comes back as its error, in place.
+export async function gmailBatchGet<T>(account: string, paths: string[]): Promise<(T | GmailApiError)[]> {
+  const results: (T | GmailApiError)[] = new Array(paths.length)
+  let pending = paths.map((_, i) => i)
+  for (let round = 0; pending.length; round++) {
+    const body =
+      pending
+        .map((i) => `--${BOUNDARY}\r\nContent-Type: application/http\r\nContent-ID: <item-${i}>\r\n\r\nGET /gmail/v1/users/me${paths[i]}\r\n\r\n`)
+        .join('') + `--${BOUNDARY}--`
+    const resp = await authorizedFetch(account, BATCH, {
+      method: 'POST',
+      body,
+      headers: { 'Content-Type': `multipart/mixed; boundary=${BOUNDARY}` },
+    })
+    if (!resp.ok) throw await apiError(resp, 'batch')
+    const answers = batchAnswers(resp.headers.get('Content-Type') ?? '', await resp.text())
+    const retry: number[] = []
+    for (const i of pending) {
+      const answer = answers.get(i) ?? new Response(null, { status: 502 })
+      if (answer.ok) results[i] = (await answer.json()) as T
+      else if (round === 0 && (await isRateLimited(answer))) retry.push(i)
+      else results[i] = await apiError(answer, `GET ${paths[i]}`)
+    }
+    if (retry.length) await new Promise((r) => setTimeout(r, RETRY_DEFAULT_MS))
+    pending = retry
+  }
+  return results
+}
+
+export const isApiError = (it: unknown): it is GmailApiError => it instanceof GmailApiError
 
 // Runs fn over items with at most `limit` in flight; Gmail's per-user quota
 // trips on a burst of 50 parallel thread fetches.

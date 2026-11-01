@@ -6,6 +6,7 @@ import {
   decodeBase64Url,
   getAllRSS,
   getRawMessage,
+  gmailBatchGet,
   gmailFetch,
   setTokenSource,
   sendReply,
@@ -22,6 +23,7 @@ import {
   type GmailPart,
   type GmailThread,
 } from './gmail'
+import { isNotFound } from './mailbox'
 import { getAccessToken, OAuthError } from '../auth/oauth'
 import { fetchTokenFromBackground, bgMessager, tagOAuthError } from '../messager'
 
@@ -401,6 +403,35 @@ describe('token source', () => {
       vi.stubGlobal('fetch', forbidden)
       await expect(gmailFetch('a@x', '/labels')).rejects.toThrow('403')
       expect(forbidden).toHaveBeenCalledTimes(1)
+    })
+
+    // Shaped as Gmail answers: each part an HTTP response of its own.
+    const part = (id: number, status: string, body: string) =>
+      `--batch_Xy\r\nContent-Type: application/http\r\nContent-ID: <response-item-${id}>\r\n\r\n` +
+      `HTTP/1.1 ${status}\r\nContent-Type: application/json; charset=UTF-8\r\nVary: Origin\r\n\r\n${body}\r\n`
+    const batchOf = (...parts: string[]) =>
+      new Response(parts.join('') + '--batch_Xy--\r\n', {
+        headers: { 'Content-Type': 'multipart/mixed; boundary=batch_Xy' },
+      })
+
+    it('batches GETs, asking a rate-limited part again once and keeping each error in place', async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(batchOf(
+          part(0, '200 OK', '{\n  "id": "a"\n}'),
+          part(1, '429 Too Many Requests', JSON.stringify({ error: { errors: [{ reason: 'rateLimitExceeded' }] } })),
+          part(2, '404 Not Found', '{"error": {"code": 404}}'),
+        ))
+        .mockResolvedValueOnce(batchOf(part(1, '200 OK', '{"id": "b"}')))
+      vi.stubGlobal('fetch', fetchMock)
+      const call = gmailBatchGet('a@x', ['/threads/a', '/threads/b', '/threads/c'])
+      await scheduled()
+      const { v } = (await settle(call, 2000)) as { v: unknown[] }
+      expect(v.slice(0, 2)).toEqual([{ id: 'a' }, { id: 'b' }])
+      expect(isNotFound(v[2])).toBe(true)
+      const [url, init] = fetchMock.mock.calls[1]!
+      expect(url).toBe('https://gmail.googleapis.com/batch/gmail/v1')
+      expect(init.headers.Authorization).toBe('Bearer T1')
+      expect(init.body.match(/GET \S+/g)).toEqual(['GET /gmail/v1/users/me/threads/b'])
     })
   })
 

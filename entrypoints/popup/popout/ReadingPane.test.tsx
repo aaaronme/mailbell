@@ -4,6 +4,7 @@ import { page } from 'vitest/browser'
 import { fakeBrowser } from '@webext-core/fake-browser'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
+import { answerBatches } from '@/lib/api/batch.testing'
 
 vi.stubGlobal('browser', fakeBrowser)
 vi.stubGlobal('chrome', fakeBrowser)
@@ -33,7 +34,7 @@ const json = (body: object) => new Response(JSON.stringify(body))
 function stubFetch() {
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: string, init?: RequestInit) => {
+    answerBatches(async (input: string, init?: RequestInit) => {
       const bearer = (init?.headers as Record<string, string> | undefined)?.Authorization
       const asB = bearer === `Bearer ${B}`
       const path = new URL(input).pathname.replace(/^.*\/gmail\/v1\/users\/me/, '')

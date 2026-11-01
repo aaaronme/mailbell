@@ -5,6 +5,7 @@ import { fakeBrowser } from '@webext-core/fake-browser'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
 import { threadUrl } from '@/lib/api/gmail'
+import { answerBatches } from '@/lib/api/batch.testing'
 
 vi.stubGlobal('browser', fakeBrowser)
 vi.stubGlobal('chrome', fakeBrowser)
@@ -185,7 +186,7 @@ describe('MailRoute', () => {
         }
         return Response.json({ labels: [] })
       })
-      vi.stubGlobal('fetch', fetchMock)
+      vi.stubGlobal('fetch', answerBatches(fetchMock))
     })
     afterEach(() => {
       release()

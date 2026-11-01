@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAccessToken } from '../auth/oauth'
 import { setTokenSource, type GmailMessage } from './gmail'
 import { decodeEntities, getThreadRowWithLabels, listHistory, listThreadPage, modifyThreads } from './mailbox'
+import { answerBatches } from './batch.testing'
 
 function msg(id: string, date: number, from: string, labels: string[], contentType: string): GmailMessage {
   return {
@@ -41,7 +42,7 @@ describe('mailbox api', () => {
         })
       return Response.json({})
     })
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', answerBatches(fetchMock))
   })
   afterEach(() => {
     setTokenSource(getAccessToken)
@@ -83,25 +84,21 @@ describe('mailbox api', () => {
     expect(sizes).toEqual(['15', '50'])
   })
 
-  it('listThreadPage fetches a first page of rows all at once, later ones 4 at a time', async () => {
-    let inFlight = 0
-    let most = 0
-    const ids = Array.from({ length: 15 }, (_, i) => ({ id: `t${i}` }))
+  it('listThreadPage fetches its rows in batches of 20, skipping any already gone', async () => {
+    const ids = Array.from({ length: 45 }, (_, i) => ({ id: `t${i}` }))
     fetchMock.mockImplementation(async (url: string) => {
       const path = new URL(url).pathname.split('/users/me')[1]!
       if (path === '/threads') return Response.json({ threads: ids })
-      inFlight++
-      most = Math.max(most, inFlight)
-      await new Promise((r) => setTimeout(r, 5))
-      inFlight--
+      if (path === '/threads/t7') return new Response('', { status: 404 })
       return Response.json({ id: path.slice(9), messages: [msg('m', 1, 'a@x.com', ['INBOX'], 'text/plain')] })
     })
-    const query = { labelIds: ['INBOX'], includeSpamTrash: false }
-    await listThreadPage('me@gmail.com', query)
-    expect(most).toBe(15)
-    most = 0
-    await listThreadPage('me@gmail.com', query, 'next')
-    expect(most).toBe(4)
+    const batch = vi.fn(answerBatches(fetchMock))
+    vi.stubGlobal('fetch', batch)
+    const page = await listThreadPage('me@gmail.com', { labelIds: ['INBOX'], includeSpamTrash: false }, 'next')
+    expect(page.rows).toHaveLength(44)
+    expect(page.rows.some((it) => it.threadId === 't7')).toBe(false)
+    const batches = batch.mock.calls.filter(([url]) => String(url).includes('/batch/'))
+    expect(batches.map(([, init]) => String(init.body).match(/GET /g)!.length)).toEqual([20, 20, 5])
   })
 
   it('modifyThreads posts each thread', async () => {

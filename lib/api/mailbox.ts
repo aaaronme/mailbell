@@ -1,7 +1,9 @@
 import {
   fetchInlineData,
+  gmailBatchGet,
   gmailFetch,
   header,
+  isApiError,
   mapLimit,
   parseAddressField,
   parseMailbox,
@@ -100,11 +102,9 @@ export async function listThreadPage(
   query: ReturnType<typeof listQuery>,
   pageToken?: string,
 ): Promise<{ rows: ThreadRow[]; nextPageToken?: string }> {
-  // Each row costs its own metadata fetch, so a short first page, fetched all
-  // at once (150 of the 250 quota units a user gets per second), shows mail
-  // sooner; the list's sentinel asks for the next one straight after.
-  const first = !pageToken
-  const params = new URLSearchParams({ maxResults: first ? '15' : '50' })
+  // A short first page shows mail sooner; the list's sentinel asks for the
+  // next one straight after.
+  const params = new URLSearchParams({ maxResults: pageToken ? '50' : '15' })
   query.labelIds.forEach((it) => params.append('labelIds', it))
   // labelIds can only require labels; leaving some out takes a search.
   const excluded = query.excludeLabelIds?.map((label) => `-category:${CATEGORY_OF.get(label)}`)
@@ -116,12 +116,25 @@ export async function listThreadPage(
     account,
     `/threads?${params}`,
   )
-  const threads = list.threads ?? []
-  const rows = await mapLimit(threads, first ? threads.length : 4, ({ id }) => getThreadRow(account, id))
+  const ids = (list.threads ?? []).map((it) => it.id)
+  const rows: ThreadRow[] = []
+  // Each row costs its own 10-unit metadata fetch; a batch of 20 stays under
+  // the 250 units a user gets per second.
+  for (let at = 0; at < ids.length; at += 20) {
+    const chunk = ids.slice(at, at + 20)
+    const threads = await gmailBatchGet<GmailThread>(account, chunk.map(rowPath))
+    for (const thread of threads) {
+      // Deleted between the list and its rows: just gone.
+      if (isNotFound(thread)) continue
+      if (isApiError(thread)) throw thread
+      rows.push(threadToRow(account, thread))
+    }
+  }
   return { rows, nextPageToken: list.nextPageToken }
 }
 
 const ROW_METADATA = ROW_HEADERS.map((it) => `metadataHeaders=${it}`).join('&')
+const rowPath = (threadId: string) => `/threads/${threadId}?format=metadata&${ROW_METADATA}`
 
 export async function getThreadRow(account: string, threadId: string): Promise<ThreadRow> {
   return (await getThreadRowWithLabels(account, threadId)).row
@@ -133,7 +146,7 @@ export async function getThreadRowWithLabels(
   account: string,
   threadId: string,
 ): Promise<{ row: ThreadRow; messageLabels: string[][] }> {
-  const thread = await gmailFetch<GmailThread>(account, `/threads/${threadId}?format=metadata&${ROW_METADATA}`)
+  const thread = await gmailFetch<GmailThread>(account, rowPath(threadId))
   return { row: threadToRow(account, thread), messageLabels: thread.messages.map((it) => it.labelIds ?? []) }
 }
 
