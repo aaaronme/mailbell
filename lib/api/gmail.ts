@@ -218,7 +218,11 @@ function batchAnswers(contentType: string, text: string): Map<number, Response> 
 // Many GETs in one request: each still costs its own quota, but not its own
 // round trip and token. A rate-limited one is asked again once, as gmailFetch
 // would; whatever still fails comes back as its error, in place.
-export async function gmailBatchGet<T>(account: string, paths: string[]): Promise<(T | GmailApiError)[]> {
+export async function gmailBatchGet<T>(
+  account: string,
+  paths: string[],
+  signal?: AbortSignal,
+): Promise<(T | GmailApiError)[]> {
   const results: (T | GmailApiError)[] = new Array(paths.length)
   let pending = paths.map((_, i) => i)
   for (let round = 0; pending.length; round++) {
@@ -230,6 +234,7 @@ export async function gmailBatchGet<T>(account: string, paths: string[]): Promis
       method: 'POST',
       body,
       headers: { 'Content-Type': `multipart/mixed; boundary=${BOUNDARY}` },
+      signal,
     })
     if (!resp.ok) throw await apiError(resp, 'batch')
     const answers = batchAnswers(resp.headers.get('Content-Type') ?? '', await resp.text())
@@ -524,28 +529,35 @@ export function threadToMail(thread: GmailThread, inlineData: Map<string, string
 // aren't downloaded at all).
 const MAX_INLINE_IMAGE_BYTES = 1_000_000
 
-export async function fetchInlineData(account: string, thread: GmailThread): Promise<Map<string, string>> {
+// Fetched a few at a time: a newsletter can carry a dozen, and the mail shows
+// only once all are in.
+export async function fetchInlineData(
+  account: string,
+  thread: GmailThread,
+  signal?: AbortSignal,
+): Promise<Map<string, string>> {
+  const images = visibleMessages(thread).flatMap((msg) =>
+    inlineImagesOf(msg)
+      .filter((image) => image.size <= MAX_INLINE_IMAGE_BYTES)
+      .map((image) => ({ msg, image })),
+  )
   const data = new Map<string, string>()
-  for (const msg of visibleMessages(thread)) {
-    for (const image of inlineImagesOf(msg)) {
-      if (image.size > MAX_INLINE_IMAGE_BYTES) continue
-      let b64 = image.data
-      if (!b64 && image.attachmentId) {
-        const att = await gmailFetch<{ data: string }>(
-          account,
-          `/messages/${msg.id}/attachments/${image.attachmentId}`,
-        ).catch((err) => {
-          void debugLog('inline image failed ->', image.contentId, err)
-          return null
-        })
-        if (!att) continue
-        b64 = att.data
-      }
-      if (b64) {
-        data.set(image.contentId, `data:${image.mimeType};base64,${toBase64(b64)}`)
-      }
+  await mapLimit(images, 4, async ({ msg, image }) => {
+    let b64 = image.data
+    if (!b64 && image.attachmentId) {
+      const att = await gmailFetch<{ data: string }>(
+        account,
+        `/messages/${msg.id}/attachments/${image.attachmentId}`,
+        { signal },
+      ).catch((err) => {
+        void debugLog('inline image failed ->', image.contentId, err)
+        return null
+      })
+      if (!att) return
+      b64 = att.data
     }
-  }
+    if (b64) data.set(image.contentId, `data:${image.mimeType};base64,${toBase64(b64)}`)
+  })
   return data
 }
 

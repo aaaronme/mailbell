@@ -19,6 +19,9 @@ export const mailKeys = {
 // Live updates keep these fresh; a refetch on every tab focus would re-list
 // each loaded page (a metadata GET per row) for nothing.
 const LIVE = { refetchOnWindowFocus: false } as const
+// A list also stays fresh when returned to: refetching would re-list every
+// page loaded, while the folder being opened waits for the quota.
+const LIVE_LIST = { ...LIVE, staleTime: Infinity } as const
 
 export const labelsOptions = (account: string) =>
   queryOptions({
@@ -85,9 +88,11 @@ function useAllInboxes(search: MailSearch, enabled: boolean): ThreadListResult {
   )
   const result = useInfiniteQuery({
     queryKey: allInboxesKey(query, accounts),
-    queryFn: async ({ pageParam }): Promise<AllInboxesPage> => {
+    queryFn: async ({ pageParam, signal }): Promise<AllInboxesPage> => {
       const asked = accounts.filter((it) => pageParam[it] !== null)
-      const settled = await Promise.allSettled(asked.map((it) => listThreadPage(it, query, pageParam[it] ?? undefined)))
+      const settled = await Promise.allSettled(
+        asked.map((it) => listThreadPage(it, query, pageParam[it] ?? undefined, signal)),
+      )
       if (asked.length && settled.every((it) => it.status === 'rejected') && !Object.keys(pageParam).length) {
         throw (settled[0] as PromiseRejectedResult).reason
       }
@@ -118,7 +123,7 @@ function useAllInboxes(search: MailSearch, enabled: boolean): ThreadListResult {
     },
     select,
     enabled: enabled && accountsQuery.isSuccess,
-    ...LIVE,
+    ...LIVE_LIST,
   })
   return {
     rows: result.data ?? NO_LIST,
@@ -139,11 +144,11 @@ export function useThreadList(search: MailSearch): ThreadListResult {
   const all = useAllInboxes(search, account === 'all')
   const result = useInfiniteQuery({
     queryKey: mailKeys.list(account, folder, query),
-    queryFn: ({ pageParam }) => listThreadPage(account, query, pageParam),
+    queryFn: ({ pageParam, signal }) => listThreadPage(account, query, pageParam, signal),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextPageToken,
     enabled: account !== 'all',
-    ...LIVE,
+    ...LIVE_LIST,
   })
   const rows = useMemo(() => uniqueRows(result.data?.pages.flatMap((it) => it.rows) ?? []), [result.data])
   if (account === 'all') return all
@@ -163,7 +168,7 @@ export const threadOptions = (url?: string) => {
   const parsed = url ? parseThreadUrl(url) : null
   return queryOptions({
     queryKey: mailKeys.thread(parsed?.account ?? '', parsed?.threadId ?? ''),
-    queryFn: () => getOpenThread(parsed!.account, parsed!.threadId),
+    queryFn: ({ signal }) => getOpenThread(parsed!.account, parsed!.threadId, signal),
     enabled: !!parsed,
     staleTime: 60_000,
     ...LIVE,

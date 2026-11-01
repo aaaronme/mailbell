@@ -146,6 +146,31 @@ describe('ThreadList', () => {
     expect(calls()).toBe(before)
   })
 
+  const toFolder = (router: Awaited<ReturnType<typeof mount>>['router'], folder: string) =>
+    router.navigate({ to: '/mail', search: (prev: object) => ({ ...prev, folder }) } as never)
+  const listsOf = (label: string) => listRequests.filter((it) => it.searchParams.getAll('labelIds').includes(label))
+
+  it('shows a folder it already loaded again without fetching it', async () => {
+    const { router } = await mount()
+    await vi.waitFor(() => expect(rows()).toHaveLength(50))
+    await toFolder(router, 'SPAM')
+    await vi.waitFor(() => expect(listsOf('SPAM')).toHaveLength(1))
+    await toFolder(router, 'INBOX')
+    await vi.waitFor(() => expect(rows()).toHaveLength(50))
+    await new Promise((r) => setTimeout(r, 300))
+    expect(listsOf('INBOX')).toHaveLength(1)
+  })
+
+  // Its requests would spend the quota the next folder needs.
+  it('cancels the load of a folder left before it arrives', async () => {
+    listGate = new Promise(() => {})
+    const { router } = await mount()
+    await vi.waitFor(() => expect(listsOf('INBOX')).toHaveLength(1))
+    await toFolder(router, 'SPAM')
+    const inbox = vi.mocked(fetch).mock.calls.find(([url]) => String(url).includes('labelIds=INBOX'))!
+    await vi.waitFor(() => expect(inbox[1]?.signal?.aborted).toBe(true))
+  })
+
   it('shows a thread two pages both carry once', async () => {
     overlap = true
     await mount()
@@ -221,13 +246,16 @@ describe('ThreadList', () => {
     await expect.element(screen.getByText('1 selected')).toBeInTheDocument()
   })
 
-  it('Unread back to All drops the UNREAD label', async () => {
-    const { screen } = await mount()
+  it('Unread back to All drops the UNREAD label, showing All as already loaded', async () => {
+    const { screen, router } = await mount()
     await vi.waitFor(() => expect(rows()).toHaveLength(50))
     await screen.getByRole('button', { name: 'Unread', exact: true }).click()
     await vi.waitFor(() => expect(listRequests.at(-1)!.searchParams.getAll('labelIds')).toContain('UNREAD'))
+    const lists = listRequests.length
     await screen.getByRole('button', { name: 'All', exact: true }).click()
-    await vi.waitFor(() => expect(listRequests.at(-1)!.searchParams.getAll('labelIds')).not.toContain('UNREAD'))
+    await vi.waitFor(() => expect(router.state.location.search).not.toHaveProperty('unread'))
+    await vi.waitFor(() => expect(rows()).toHaveLength(50))
+    expect(listRequests).toHaveLength(lists)
   })
 
   it('clearing the search removes q', async () => {

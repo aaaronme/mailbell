@@ -101,6 +101,7 @@ export async function listThreadPage(
   account: string,
   query: ReturnType<typeof listQuery>,
   pageToken?: string,
+  signal?: AbortSignal,
 ): Promise<{ rows: ThreadRow[]; nextPageToken?: string }> {
   // A short first page shows mail sooner; the list's sentinel asks for the
   // next one straight after.
@@ -115,6 +116,7 @@ export async function listThreadPage(
   const list = await gmailFetch<{ threads?: { id: string }[]; nextPageToken?: string }>(
     account,
     `/threads?${params}`,
+    { signal },
   )
   const ids = (list.threads ?? []).map((it) => it.id)
   const rows: ThreadRow[] = []
@@ -122,7 +124,7 @@ export async function listThreadPage(
   // the 250 units a user gets per second.
   for (let at = 0; at < ids.length; at += 20) {
     const chunk = ids.slice(at, at + 20)
-    const threads = await gmailBatchGet<GmailThread>(account, chunk.map(rowPath))
+    const threads = await gmailBatchGet<GmailThread>(account, chunk.map(rowPath), signal)
     for (const thread of threads) {
       // Deleted between the list and its rows: just gone.
       if (isNotFound(thread)) continue
@@ -204,10 +206,10 @@ export interface OpenThread extends ThreadMail {
   labelIds: string[]
 }
 
-export async function getOpenThread(account: string, threadId: string): Promise<OpenThread> {
-  const thread = await gmailFetch<GmailThread>(account, `/threads/${threadId}?format=full`)
+export async function getOpenThread(account: string, threadId: string, signal?: AbortSignal): Promise<OpenThread> {
+  const thread = await gmailFetch<GmailThread>(account, `/threads/${threadId}?format=full`, { signal })
   return {
-    ...threadToMail(thread, await fetchInlineData(account, thread)),
+    ...threadToMail(thread, await fetchInlineData(account, thread, signal)),
     url: threadUrl(account, threadId),
     account,
     labelIds: labelsOf(thread),

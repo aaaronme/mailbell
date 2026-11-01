@@ -98,7 +98,7 @@ describe('mailbox api', () => {
     expect(page.rows).toHaveLength(44)
     expect(page.rows.some((it) => it.threadId === 't7')).toBe(false)
     const batches = batch.mock.calls.filter(([url]) => String(url).includes('/batch/'))
-    expect(batches.map(([, init]) => String(init.body).match(/GET /g)!.length)).toEqual([20, 20, 5])
+    expect(batches.map(([, init]) => String(init?.body).match(/GET /g)!.length)).toEqual([20, 20, 5])
   })
 
   it('modifyThreads posts each thread', async () => {
