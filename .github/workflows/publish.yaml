@@ -1,0 +1,64 @@
+name: Publish to stores
+
+# Uploads a release's zips to the Chrome Web Store and addons.mozilla.org and
+# submits them for review. Runs after Release succeeds (a release made with
+# GITHUB_TOKEN can't trigger `on: release`), or by hand for any tag. A store
+# whose secrets aren't set is skipped: see docs/RELEASING.md.
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, like v1.0.2
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      # A tag push's workflow_run carries the tag as its head_branch.
+      TAG: ${{ inputs.tag || github.event.workflow_run.head_branch }}
+      CHROME_API_VERSION: v2
+      CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+      CHROME_PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
+      CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL: ${{ secrets.CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL }}
+      CHROME_SERVICE_ACCOUNT_PRIVATE_KEY: ${{ secrets.CHROME_SERVICE_ACCOUNT_PRIVATE_KEY }}
+      FIREFOX_EXTENSION_ID: mailbell@aaaronme.github.io
+      FIREFOX_JWT_ISSUER: ${{ secrets.FIREFOX_JWT_ISSUER }}
+      FIREFOX_JWT_SECRET: ${{ secrets.FIREFOX_JWT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: gh release download "$TAG" --dir .output
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Submit
+        run: |
+          version="${TAG#v}"
+          args=()
+          if [ -n "$CHROME_EXTENSION_ID" ] && [ -n "$CHROME_SERVICE_ACCOUNT_PRIVATE_KEY" ]; then
+            args+=(--chrome-zip ".output/mailbell-$version-chrome.zip")
+          else
+            echo "::warning::Chrome Web Store secrets not set, skipping Chrome"
+          fi
+          if [ -n "$FIREFOX_JWT_SECRET" ]; then
+            args+=(--firefox-zip ".output/mailbell-$version-firefox.zip" --firefox-sources-zip ".output/mailbell-$version-sources.zip")
+          else
+            echo "::warning::AMO secrets not set, skipping Firefox"
+          fi
+          if [ ${#args[@]} -gt 0 ]; then
+            pnpm wxt submit "${args[@]}"
+          fi

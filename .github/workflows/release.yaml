@@ -1,8 +1,8 @@
 name: Release
 
 # Push a tag like v1.0.0 (matching package.json's version) to build both
-# stores' zips and attach them to a GitHub release. Uploading to AMO and the
-# Chrome Web Store stays manual: see docs/RELEASING.md.
+# stores' zips and attach them to a GitHub release; "Publish to stores"
+# then submits them to AMO and the Chrome Web Store (docs/RELEASING.md).
 on:
   push:
     tags: ['v*']
@@ -25,8 +25,16 @@ jobs:
       - run: pnpm compile
       - run: pnpm test
       - run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
+      # The built-in OAuth client (docs/RELEASING.md); unset, the release asks
+      # every user for their own.
       - run: pnpm zip
+        env:
+          WXT_GOOGLE_CLIENT_ID: ${{ secrets.WXT_GOOGLE_CLIENT_ID }}
+          WXT_GOOGLE_CLIENT_SECRET: ${{ secrets.WXT_GOOGLE_CLIENT_SECRET }}
       - run: pnpm zip:firefox
+        env:
+          WXT_GOOGLE_CLIENT_ID: ${{ secrets.WXT_GOOGLE_CLIENT_ID }}
+          WXT_GOOGLE_CLIENT_SECRET: ${{ secrets.WXT_GOOGLE_CLIENT_SECRET }}
       - run: gh release create "$GITHUB_REF_NAME" .output/*.zip --title "Mailbell $GITHUB_REF_NAME" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
