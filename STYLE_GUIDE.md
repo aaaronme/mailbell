@@ -12,7 +12,7 @@ The popup is a small, dense, reading-first surface. The design follows from that
 
 ## Tokens
 
-The tokens are defined in `entrypoints/popup/style.css`. Light is the default, and dark comes from `prefers-color-scheme`. Dark is OrderX Blue: a navy page (`#00111b`), slightly lighter menus (`#021b27`) and a sky-cyan `bell` (`#7cd0e8`).
+The tokens are defined in `entrypoints/popup/style.css`, but the surfaces (`background`, `card`, `popover`, and `page`, the page fill that may be a gradient) come from the user's theme in `lib/theme.ts`, set inline on `<html>`. Light or dark follows `prefers-color-scheme` unless the theme picks one. Text and fills stay `foreground/N` in every theme. Sticky bars use `bg-page`, which pins the fill to the viewport so a gradient runs through them unbroken. Anything that can't read the tokens (the mail's dark filter, toasts) asks `useIsDark()`, never the media query.
 
 | Token | Use |
 | --- | --- |

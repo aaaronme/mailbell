@@ -7,6 +7,7 @@ import { debugLog } from '@/lib/debugLog'
 import { fetchTokenFromBackground, popupMessager } from '@/lib/messager'
 import { parseThreadUrl, setTokenSource } from '@/lib/api/gmail'
 import { isPopoutTab } from './view'
+import { paintCachedTheme } from '@/lib/theme'
 import { router } from './router'
 import { validateMailSearch } from './popout/mailSearch'
 import type { VisibleMessage } from '@/lib/fastPoll'
@@ -19,6 +20,7 @@ if (!isPopoutTab) {
 }
 
 setTokenSource(fetchTokenFromBackground)
+paintCachedTheme()
 
 // A notification click lands here when a popout is already open: show that mail
 // and bring the tab forward. Focus is best effort - the navigation is what counts.

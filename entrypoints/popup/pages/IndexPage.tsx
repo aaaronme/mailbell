@@ -30,6 +30,7 @@ import { GithubIcon } from '@/components/extra/GithubIcon'
 import { Avatar } from '@/components/extra/Avatar'
 import { useClient } from '@/components/extra/ClientForm'
 import { SetupGuide } from './SetupGuide'
+import { ThemePicker, useEditableTheme } from '@/components/extra/ThemePicker'
 import { PageHeader } from '@/components/extra/PageHeader'
 import type { EmailThread } from '@/lib/StateManager'
 import { getThreadCode } from '@/lib/otp'
@@ -114,7 +115,7 @@ function CodeBar({ threads }: { threads: EmailThread[] }) {
   }, [newest])
   if (!codes.length) return null
   return (
-    <div className="sticky bottom-0 z-10 flex flex-col border-t border-foreground/10 bg-background">
+    <div className="sticky bottom-0 z-10 flex flex-col border-t border-foreground/10 bg-page">
       {codes.map(({ thread, code }, i) => (
         <button
           key={thread.url}
@@ -332,7 +333,7 @@ function MailList({
         return (
           <section key={account}>
             {/* top-12: sticks under the page header, not behind it. */}
-            <h2 className="sticky top-12 z-10 border-b border-foreground/10 bg-background text-xs font-medium text-foreground/60">
+            <h2 className="sticky top-12 z-10 border-b border-foreground/10 bg-page text-xs font-medium text-foreground/60">
               <button
                 type="button"
                 title={`Open ${account} in Gmail`}
@@ -415,10 +416,23 @@ export function IndexPage() {
               <p className="text-xs text-foreground/60">Sign in to see new mail and one-time codes here.</p>
             </div>
             <Button onClick={() => addAccount()}>Sign in with Google</Button>
+            <FirstLook />
           </>
         )}
       </div>
       <CodeBar threads={mailQuery.data?.threads ?? []} />
+    </div>
+  )
+}
+
+// Before the first sign-in: pick the look, changeable later in Settings.
+function FirstLook() {
+  const { theme, update } = useEditableTheme()
+  if (!theme) return null
+  return (
+    <div className="mt-4 flex w-full max-w-xs flex-col gap-2 text-left">
+      <p className="text-xs font-medium text-foreground/60">Make it yours</p>
+      <ThemePicker theme={theme} onChange={update} />
     </div>
   )
 }

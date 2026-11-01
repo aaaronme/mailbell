@@ -170,7 +170,7 @@ function SidebarOverlay({ onClose }: { onClose: () => void }) {
   return (
     <>
       <div className="absolute inset-0 z-10 bg-foreground/10" onClick={onClose} />
-      <div className="absolute inset-y-0 left-0 z-20 w-56 overflow-y-auto border-r border-foreground/10 bg-background">
+      <div className="absolute inset-y-0 left-0 z-20 w-56 overflow-y-auto border-r border-foreground/10 bg-page">
         <Sidebar onNavigate={onClose} />
       </div>
     </>

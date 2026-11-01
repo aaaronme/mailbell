@@ -1,11 +1,15 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
-/* Tokens (STYLE_GUIDE.md -> Tokens). Light by default, dark from the system
-   preference: no theme toggle, no .dark class. Components never read these
-   directly; they use the utilities from @theme below, mostly foreground/N. */
+/* Tokens (STYLE_GUIDE.md -> Tokens). The surfaces come from the user's theme
+   (lib/theme.ts), set inline on <html>; these are only the default for the
+   moment before that, light or dark from the system preference. Components
+   never read these directly; they use the utilities from @theme below, mostly
+   foreground/N. */
 :root {
   --background: #f6f6f6;
+  /* The page fill: --background, or a gradient. */
+  --page: var(--background);
   --foreground: #0c0c0d;
   --card: #ffffff;
   --popover: #ffffff;
@@ -18,8 +22,6 @@
   --bell: #087f8c;
 }
 
-/* Dark is OrderX Blue (frontend-v2's navy theme), solid rather than its
-   banded gradient: the sticky bars need an opaque fill that matches the page. */
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #00111b;
@@ -55,8 +57,15 @@
     color-scheme: light dark;
   }
   body {
-    @apply bg-background text-foreground font-sans text-sm antialiased;
+    @apply bg-page text-foreground font-sans text-sm antialiased;
   }
+}
+
+/* The page fill, pinned to the viewport: a sticky bar painting it lines up
+   with the page behind, gradient and all, and still hides what scrolls under. */
+@utility bg-page {
+  background: var(--page);
+  background-attachment: fixed;
 }
 
 /* The one floating surface (STYLE_GUIDE.md -> Menus): menus and toasts. Flush,

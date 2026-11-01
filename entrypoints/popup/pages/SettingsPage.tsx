@@ -11,6 +11,8 @@ import { ClientForm, customClientQueryKey, RedirectUri, SETUP_GUIDE_URL, useClie
 import { useAccounts } from '@/lib/useAccounts'
 import { addAccount } from '@/lib/accounts'
 import { Switch } from '@/components/ui/switch'
+import { ThemePicker, useEditableTheme } from '@/components/extra/ThemePicker'
+import type { ThemeMode } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import {
   accountSettings,
@@ -350,11 +352,33 @@ function ClientSection() {
   )
 }
 
+function AppearanceSection() {
+  const { theme, update } = useEditableTheme()
+  if (!theme) return null
+  return (
+    <Section title="Appearance">
+      <Row label="Mode">
+        <Choice<ThemeMode>
+          options={[
+            ['system', 'System'],
+            ['light', 'Light'],
+            ['dark', 'Dark'],
+          ]}
+          value={theme.mode}
+          onChange={(mode) => update({ mode })}
+        />
+      </Row>
+      <ThemePicker theme={theme} onChange={update} />
+    </Section>
+  )
+}
+
 export function SettingsPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <PageHeader back title={<PageTitle>Settings</PageTitle>} />
       <AccountsSection />
+      <AppearanceSection />
       <NotificationsSection />
       <ClientSection />
     </div>

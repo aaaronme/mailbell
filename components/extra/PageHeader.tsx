@@ -17,7 +17,7 @@ export function PageHeader({
   const navigate = useNavigate()
   useShortcuts({ u: () => navigate({ to: '/' }) }, !!back)
   return (
-    <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-1 border-b border-foreground/10 bg-background px-2">
+    <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-1 border-b border-foreground/10 bg-page px-2">
       {back && (
         <Button size="icon" variant="ghost" title="Back (u)" onClick={() => navigate({ to: '/' })}>
           <ArrowLeftIcon />

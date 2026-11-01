@@ -6,6 +6,7 @@ import { RouterProvider } from '@tanstack/react-router'
 import { queryClient } from '@/lib/queryClient'
 import { createStyleSheets } from '@/lib/addStyle'
 import { DARK_MODE_RULES } from './DetailPage'
+import { applyTheme, DEFAULT_THEME } from '@/lib/theme'
 import type { EmailThread } from '@/lib/StateManager'
 import { CURRENT_EXTRACT_VERSION, type ThreadMail } from '@/lib/api/gmail'
 import { senderIdentity } from '@/lib/mail/identity'
@@ -137,31 +138,31 @@ describe('DetailPage', () => {
   })
 
   describe('dark mode', () => {
-    // Dark mode is pure CSS now (@media (prefers-color-scheme: dark) in
-    // DARK_MODE_FILTER_STYLE) - no next-themes/JS state to force a theme
-    // with, so these check the generated CSS itself: that the invert filter
-    // is correctly scoped inside the media query (trusting the browser's
-    // own well-tested media query engine to gate it at render time), and
-    // that the always-on color reset is present regardless of theme.
+    // The theme decides dark (data-mode on <html>, which applyTheme sets), so
+    // these set it directly and check the mail's own stylesheets: the invert
+    // filter only while dark, the color reset always.
     let screen: Awaited<ReturnType<typeof render>> | undefined
 
     afterEach(async () => {
       await screen?.unmount()
       screen = undefined
+      delete document.documentElement.dataset.mode
     })
 
-    it('scopes the invert filter to a prefers-color-scheme: dark media query', async () => {
+    it('inverts the mail only while the page is dark', async () => {
+      document.documentElement.dataset.mode = 'dark'
       screen = await renderDetail(makeThread(1))
       await vi.waitUntil(() => [...screen!.container.querySelectorAll('*')].some((el) => el.shadowRoot))
       const host = [...screen.container.querySelectorAll('*')].find((el) => el.shadowRoot) as HTMLElement
-      await vi.waitUntil(() => host.shadowRoot!.adoptedStyleSheets.length > 0)
-      const mediaRules = [...host.shadowRoot!.adoptedStyleSheets]
-        .flatMap((sheet) => [...sheet.cssRules])
-        .filter((rule): rule is CSSMediaRule => rule instanceof CSSMediaRule)
-      expect(mediaRules).toHaveLength(1)
-      const mediaRule = mediaRules[0]!
-      expect(mediaRule.conditionText).toBe('(prefers-color-scheme: dark)')
-      expect(mediaRule.cssText).toContain('invert(1)')
+      const css = () =>
+        [...host.shadowRoot!.adoptedStyleSheets]
+          .flatMap((sheet) => [...sheet.cssRules])
+          .map((rule) => rule.cssText)
+          .join('\n')
+      await vi.waitUntil(() => css().includes('invert(1)'))
+
+      applyTheme({ ...DEFAULT_THEME, mode: 'light' })
+      await vi.waitUntil(() => !css().includes('invert(1)'))
     })
 
     it('does not leak the app dark-mode --foreground into unstyled email text', async () => {

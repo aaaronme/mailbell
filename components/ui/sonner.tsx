@@ -1,13 +1,13 @@
 import { CircleCheckIcon, InfoIcon, Loader2Icon, OctagonXIcon, TriangleAlertIcon } from 'lucide-react'
 import { Toaster as Sonner, type ToasterProps } from 'sonner'
+import { useIsDark } from '@/lib/theme'
 
 // Toasts take the popover fill and hairline, square; only the icon carries
 // state color.
 const Toaster = (props: ToasterProps) => {
   return (
     <Sonner
-      // Sonner follows prefers-color-scheme itself when given "system".
-      theme="system"
+      theme={useIsDark() ? 'dark' : 'light'}
       icons={{
         success: <CircleCheckIcon className="size-4" />,
         info: <InfoIcon className="size-4" />,

@@ -11,6 +11,7 @@ import { useCorrespondents } from '@/lib/mail/correspondents'
 import { getTrustedSenders, shouldShowRemote, trustSender } from '@/lib/mail/remoteContent'
 import { safeParts } from '@/lib/mail/safeText'
 import { SafeLink } from './SafeLink'
+import { useIsDark } from '@/lib/theme'
 import { REASON_TEXT, type SuspicionReason } from '@/lib/mail/suspicion'
 
 // react-shadow's `root` is proxied via an index signature, which under
@@ -79,12 +80,9 @@ const BASE_RESET_STYLE = `
 // text disappear entirely.
 const DARK_MODE_BRIGHTNESS = 1.5
 
-// Wrapped in the media query itself rather than picked in JS - the whole
-// point of moving off next-themes is that dark mode is now purely a system
-// preference the browser applies on its own, so this rule only needs to be
-// present in the stylesheet, never conditionally included. The rules are kept
-// in their own exported constant so a test can apply them without the media
-// query wrapper (a browser test cannot switch prefers-color-scheme on demand).
+// Included only while the page is dark, which the theme decides as well as
+// the system (useIsDark), so no media query: a Light theme on a dark system
+// must not invert the mail.
 export const DARK_MODE_RULES = `
     :host {
       filter: invert(1) hue-rotate(180deg) brightness(${DARK_MODE_BRIGHTNESS});
@@ -149,22 +147,17 @@ export const DARK_MODE_RULES = `
     }
 `
 
-const DARK_MODE_FILTER_STYLE = `
-  @media (prefers-color-scheme: dark) {
-${DARK_MODE_RULES}  }
-`
-
-
 // `remote` is the only switch between the blocked and the unblocked rendering:
 // both come from sanitizing the original html, never from the blocked one.
 const MailContent = memo((props: { contentHtml: string; styles: string[]; remote: boolean }) => {
+  const dark = useIsDark()
   const styleSheets = useMemo(() => {
     return createStyleSheets([
       BASE_RESET_STYLE,
       ...props.styles.map((it) => sanitizeStyles(it, { remote: props.remote }).css),
-      DARK_MODE_FILTER_STYLE,
+      ...(dark ? [DARK_MODE_RULES] : []),
     ])
-  }, [props.styles, props.remote])
+  }, [props.styles, props.remote, dark])
   const html = useMemo(
     () => sanitizeMail(props.contentHtml, { remote: props.remote }).html,
     [props.contentHtml, props.remote],

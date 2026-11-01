@@ -7,9 +7,11 @@ import { mailQueryKey } from '@/lib/useMailQuery'
 import { notifyRefreshPopup } from '@/lib/mail/live'
 import { queryClient } from '@/lib/queryClient'
 import { useEffectOnce } from '@/lib/utils/useEffectOnce'
+import { useThemeSync } from '@/lib/theme'
 
 function AppContent() {
   const queryClient = useQueryClient()
+  useThemeSync()
   useEffectOnce(() => {
     // Lives here, not in a specific route's component: this has to run once
     // per popup session, not once per visit to whichever route happens to
