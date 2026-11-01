@@ -295,6 +295,51 @@ td.yes,
 thead th.yes {
   color: var(--fg);
 }
+/* On a phone each row becomes a short block: the question, then one line
+   per alternative. */
+@media (max-width: 600px) {
+  .table {
+    margin: 32px 0 0;
+    padding: 0;
+  }
+  table,
+  tbody,
+  tr,
+  th,
+  td {
+    display: block;
+    min-width: 0;
+    width: auto;
+  }
+  thead {
+    display: none;
+  }
+  tbody tr {
+    padding: 16px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  tbody th {
+    position: static;
+    padding: 0 0 6px;
+    border: 0;
+  }
+  td {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 12px;
+    padding: 4px 0;
+    border: 0;
+  }
+  td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 13px;
+  }
+  td.yes::before {
+    color: var(--bell);
+    font-weight: 600;
+  }
+}
 
 footer.site {
   border-top: 1px solid var(--line);
@@ -309,6 +354,20 @@ footer.site .wrap {
 }
 footer.site span {
   margin-right: auto;
+}
+@media (max-width: 600px) {
+  footer.site span {
+    flex-basis: 100%;
+  }
+  header.site .wrap {
+    gap: 14px;
+  }
+  header.site .brand span {
+    display: none;
+  }
+  header.site nav {
+    gap: 14px;
+  }
 }
 footer.site a {
   color: var(--muted);

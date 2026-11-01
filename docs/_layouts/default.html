@@ -17,9 +17,9 @@
   <body>
     <header class="site">
       <div class="wrap">
-        <a class="brand" href="{{ '/' | relative_url }}">
+        <a class="brand" href="{{ '/' | relative_url }}" aria-label="Mailbell home">
           <img src="{{ '/assets/icon.png' | relative_url }}" alt="" width="24" height="24" />
-          Mailbell
+          <span>Mailbell</span>
         </a>
         <nav>
           {% for item in site.data.nav %}

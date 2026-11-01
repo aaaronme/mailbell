@@ -4,9 +4,7 @@ url: https://aaaronme.github.io
 baseurl: /mailbell
 lang: en
 locale: en_US
-twitter: { card: summary_large_image }
 logo: /assets/icon.png
-author: aaaronme
 github_url: https://github.com/aaaronme/mailbell
 
 plugins:
