@@ -103,6 +103,20 @@ describe('ThreadView', () => {
     await vi.waitFor(() => expect(shadowOf(view.container)?.querySelector('a')?.textContent).toBe('Login'))
   })
 
+  it('a trusted sender skips the safe text for a spoofed name, never for Spam', async () => {
+    const spoof = thread({ from: 'support@paypal.com <ann@example.com>', html: '<p><b>Hi</b></p>' })
+    const view = await renderView(spoof)
+    await expect.element(view.getByText("The sender's name shows a different address")).toBeVisible()
+    await view.getByRole('button', { name: 'Always show from this sender' }).click()
+    await vi.waitFor(() => expect(shadowOf(view.container)?.querySelector('b')?.textContent).toBe('Hi'))
+    expect(await getTrustedSenders(ACCOUNT)).toContain('ann@example.com')
+    await view.unmount()
+
+    const spam = await renderView(thread({ from: 'support@paypal.com <ann@example.com>', labels: ['SPAM'] }))
+    await expect.element(spam.getByText('This is in Spam', { exact: false })).toBeVisible()
+    expect(spam.getByRole('button', { name: 'Always show from this sender' }).query()).toBeNull()
+  })
+
   it('a safe-text link opens a menu to copy or open its full url', async () => {
     const href = 'https://evil.ru/c/long-tracking-path'
     const view = await renderView(thread({ labels: ['SPAM'], html: `<p><a href="${href}">Login</a></p>` }))

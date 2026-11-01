@@ -193,7 +193,20 @@ export function ProtectedContent(props: {
     [message.contentHtml, styles],
   )
 
-  if (suspicion.length > 0 && !formatted) {
+  async function trust() {
+    try {
+      await trustSender(account, email)
+      await queryClient.invalidateQueries({ queryKey: trustedKey })
+    } catch (err) {
+      console.error(err)
+      toast.error(`Could not save: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  // A sender you trust can still look like someone else, which is all these
+  // two say; Spam and failed sender checks hold whoever it is.
+  const trustable = suspicion.every((it) => it === 'name-spoof' || it === 'lookalike')
+  if (suspicion.length > 0 && !formatted && !(trustable && trusted.data?.has(email))) {
     return (
       <div className="flex flex-col gap-2">
         <div className="text-xs font-medium">{suspicion.map((it) => REASON_TEXT[it]).join('. ')}</div>
@@ -202,10 +215,15 @@ export function ProtectedContent(props: {
             typeof it === 'string' ? it : <SafeLink key={i} text={it.text} href={it.href} />,
           )}
         </pre>
-        <div>
+        <div className="flex gap-1">
           <Button size="sm" variant="ghost" onClick={() => setFormatted(true)}>
             Show formatted
           </Button>
+          {trustable && (
+            <Button size="sm" variant="ghost" onClick={trust}>
+              Always show from this sender
+            </Button>
+          )}
         </div>
       </div>
     )
@@ -224,19 +242,7 @@ export function ProtectedContent(props: {
           <Button size="sm" variant="ghost" onClick={() => setShownOnce(true)}>
             Show images
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={async () => {
-              try {
-                await trustSender(account, email)
-                await queryClient.invalidateQueries({ queryKey: trustedKey })
-              } catch (err) {
-                console.error(err)
-                toast.error(`Could not save: ${err instanceof Error ? err.message : String(err)}`)
-              }
-            }}
-          >
+          <Button size="sm" variant="ghost" onClick={trust}>
             Always show from this sender
           </Button>
         </div>
