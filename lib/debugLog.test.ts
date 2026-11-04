@@ -26,6 +26,17 @@ describe('debugLog', () => {
     expect(logs[1]).includes('second')
   })
 
+  // getAllRSS logs a failed account without waiting, and fetchThreads logs its
+  // summary right after.
+  it('keeps a line logged while another is being written', async () => {
+    void debugLog('first')
+    await debugLog('second')
+    const logs = await getDebugLogs()
+    expect(logs).length(2)
+    expect(logs[0]).includes('first')
+    expect(logs[1]).includes('second')
+  })
+
   it('caps the buffer instead of growing unbounded', async () => {
     for (let i = 0; i < 305; i++) {
       await debugLog(`entry-${i}`)

@@ -23,19 +23,26 @@ function hasBrowser() {
 // The background's console only shows what was logged while a devtools window
 // was open. Keep a rolling buffer in storage.local (shared across contexts,
 // survives background restarts) so it can be read after the fact.
-export async function debugLog(...args: unknown[]) {
+export function debugLog(...args: unknown[]): Promise<void> {
   console.log(...args)
   if (!hasBrowser()) {
-    return
+    return Promise.resolve()
   }
   const line = `[${new Date().toISOString()}] ${args.map(formatArg).join(' ')}`
-  try {
-    const { [STORAGE_KEY]: existing = [] } = await browser.storage.local.get<Record<string, string[]>>(STORAGE_KEY)
-    await browser.storage.local.set({ [STORAGE_KEY]: [...existing, line].slice(-MAX_ENTRIES) })
-  } catch (err) {
-    console.error('debugLog: failed to persist log entry', err)
-  }
+  // One at a time: appending reads the whole buffer and writes it back, so an
+  // overlapping call would overwrite this line. Only within this context; a
+  // line can still be lost to another page writing at the same moment.
+  writing = writing.then(async () => {
+    try {
+      const { [STORAGE_KEY]: existing = [] } = await browser.storage.local.get<Record<string, string[]>>(STORAGE_KEY)
+      await browser.storage.local.set({ [STORAGE_KEY]: [...existing, line].slice(-MAX_ENTRIES) })
+    } catch (err) {
+      console.error('debugLog: failed to persist log entry', err)
+    }
+  })
+  return writing
 }
+let writing: Promise<void> = Promise.resolve()
 
 export async function getDebugLogs(): Promise<string[]> {
   const { [STORAGE_KEY]: logs = [] } = await browser.storage.local.get<Record<string, string[]>>(STORAGE_KEY)
