@@ -374,6 +374,23 @@ describe('StateManager', () => {
       expect(seenAsNew).toEqual([feed.url])
     })
 
+    it('does not notify again for a mail left open across polls', async () => {
+      const stateManager = new StateManager(api)
+      await seedOneThread(stateManager)
+      api.markAsRead.mockImplementation(async () => {})
+      await stateManager.viewed(feed.url)
+      const seenAsNew: string[] = []
+      stateManager.on(async () => {
+        seenAsNew.push(...stateManager.getNewThreads().map((t) => t.url))
+      })
+      // Reading it took it out of Gmail's unread feed; it stays in the list.
+      api.getAllRSS.mockImplementation(async () => [{ email: 'test@test.com', feeds: [] }])
+      await stateManager.fetchThreads()
+      await stateManager.fetchThreads()
+      expect(stateManager.threads.map((t) => t.url)).toEqual([feed.url])
+      expect(seenAsNew).toEqual([])
+    })
+
     it('one thread failing to fetch does not hide the others', async () => {
       const stateManager = new StateManager(api)
       const secondFeed: Feed = { ...feed, url: feed.url.replace('message_id=', 'message_id=2') }

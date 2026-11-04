@@ -158,7 +158,13 @@ export class StateManager {
       // Every readable account's full feed.
       const feedUrls = new Set(feeds.map((it) => it.url))
       const failedUrls = new Set(this.threads.filter((t) => failed.has(t.account)).map((t) => t.url))
-      this.notifiedEmails = new Set([...this.notifiedEmails].filter((url) => feedUrls.has(url) || failedUrls.has(url)))
+      // A viewed mail has left the unread feed but stays in the list below:
+      // pruning it made it look new on every poll while it was open.
+      this.notifiedEmails = new Set(
+        [...this.notifiedEmails].filter(
+          (url) => feedUrls.has(url) || failedUrls.has(url) || this.viewedEmails.has(url),
+        ),
+      )
       // Assembled in locals and written to this.threads only once complete:
       // the getThreadMail() calls below take hundreds of ms, and any action
       // arriving in that window calls notify(), which persists this.threads
