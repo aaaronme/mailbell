@@ -10,6 +10,7 @@ import {
   setAttribute,
 } from '../domutils'
 import { debugLog } from '../debugLog'
+import { quotaMeter } from './quotaMeter'
 import { liftBackgroundImages } from '../emailBackground'
 import { getAccessToken, getAccounts } from '../auth/oauth'
 import { senderIdentity, type SenderIdentity } from '../mail/identity'
@@ -152,6 +153,15 @@ async function isRateLimited(resp: Response): Promise<boolean> {
   return /"(user)?rateLimitExceeded"/i.test(text)
 }
 
+// Wider than isRateLimited: a per-minute quota error names the quota, and its
+// reason may not be one worth retrying.
+async function isOutOfQuota(resp: Response): Promise<boolean> {
+  if (resp.status === 429) return true
+  if (resp.status !== 403) return false
+  const text = await resp.clone().text().catch(() => '')
+  return /rateLimitExceeded|quota exceeded/i.test(text)
+}
+
 function retryDelay(resp: Response): number {
   const seconds = Number(resp.headers.get('Retry-After') ?? NaN)
   return Number.isFinite(seconds) && seconds >= 0 ? Math.min(seconds * 1000, RETRY_MAX_MS) : RETRY_DEFAULT_MS
@@ -159,9 +169,15 @@ function retryDelay(resp: Response): number {
 
 // The request with the account's token, retried once on a 401 and once on a
 // rate limit; any other answer is the caller's.
-async function authorizedFetch(account: string, url: string, init: RequestInit): Promise<Response> {
-  const send = async (token: string) =>
-    fetch(url, {
+async function authorizedFetch(
+  account: string,
+  url: string,
+  init: RequestInit,
+  requests: string[],
+): Promise<Response> {
+  const send = async (token: string) => {
+    quotaMeter.record(account, requests)
+    const answer = await fetch(url, {
       ...init,
       headers: {
         Authorization: `Bearer ${token}`,
@@ -169,6 +185,9 @@ async function authorizedFetch(account: string, url: string, init: RequestInit):
         ...init.headers,
       },
     })
+    if (await isOutOfQuota(answer)) quotaMeter.limitHit(account)
+    return answer
+  }
   const token = await tokenSource(account)
   let resp = await send(token)
   // The token can be revoked or expire early. A parallel request may already
@@ -191,8 +210,9 @@ async function apiError(resp: Response, what: string): Promise<GmailApiError> {
 }
 
 export async function gmailFetch<T>(account: string, path: string, init: RequestInit = {}): Promise<T> {
-  const resp = await authorizedFetch(account, `${API}${path}`, init)
-  if (!resp.ok) throw await apiError(resp, `${init.method ?? 'GET'} ${path}`)
+  const request = `${init.method ?? 'GET'} ${path}`
+  const resp = await authorizedFetch(account, `${API}${path}`, init, [request])
+  if (!resp.ok) throw await apiError(resp, request)
   return (resp.status === 204 ? undefined : await resp.json()) as T
 }
 
@@ -230,17 +250,23 @@ export async function gmailBatchGet<T>(
       pending
         .map((i) => `--${BOUNDARY}\r\nContent-Type: application/http\r\nContent-ID: <item-${i}>\r\n\r\nGET /gmail/v1/users/me${paths[i]}\r\n\r\n`)
         .join('') + `--${BOUNDARY}--`
-    const resp = await authorizedFetch(account, BATCH, {
-      method: 'POST',
-      body,
-      headers: { 'Content-Type': `multipart/mixed; boundary=${BOUNDARY}` },
-      signal,
-    })
+    const resp = await authorizedFetch(
+      account,
+      BATCH,
+      {
+        method: 'POST',
+        body,
+        headers: { 'Content-Type': `multipart/mixed; boundary=${BOUNDARY}` },
+        signal,
+      },
+      pending.map((i) => `GET ${paths[i]}`),
+    )
     if (!resp.ok) throw await apiError(resp, 'batch')
     const answers = batchAnswers(resp.headers.get('Content-Type') ?? '', await resp.text())
     const retry: number[] = []
     for (const i of pending) {
       const answer = answers.get(i) ?? new Response(null, { status: 502 })
+      if (await isOutOfQuota(answer)) quotaMeter.limitHit(account)
       if (answer.ok) results[i] = (await answer.json()) as T
       else if (round === 0 && (await isRateLimited(answer))) retry.push(i)
       else results[i] = await apiError(answer, `GET ${paths[i]}`)

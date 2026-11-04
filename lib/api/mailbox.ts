@@ -120,8 +120,7 @@ export async function listThreadPage(
   )
   const ids = (list.threads ?? []).map((it) => it.id)
   const rows: ThreadRow[] = []
-  // Each row costs its own 10-unit metadata fetch; a batch of 20 stays under
-  // the 250 units a user gets per second.
+  // Each row costs its own 40-unit metadata fetch, batched or not.
   for (let at = 0; at < ids.length; at += 20) {
     const chunk = ids.slice(at, at + 20)
     const threads = await gmailBatchGet<GmailThread>(account, chunk.map(rowPath), signal)

@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeBrowser } from '@webext-core/fake-browser'
+import { answerBatches } from './batch.testing'
+import { getDebugLogs } from '../debugLog'
 import {
   CURRENT_EXTRACT_VERSION,
   clearInboxCache,
@@ -284,7 +286,52 @@ describe('Gmail API calls', () => {
     await expect(getAllRSS()).rejects.toThrow('503')
   })
 
-  describe('when a thread fails to load', () => {
+  describe('the quota meter', () => {
+  const QUOTA_ERROR = { error: { code: 403, message: "Quota exceeded for quota metric 'Total Query Cost'" } }
+  const quotaLines = async () => (await getDebugLogs()).filter((it) => it.includes('quota:'))
+
+  beforeEach(() => {
+    fakeBrowser.reset()
+    setTokenSource(async () => 'token')
+  })
+  afterEach(() => {
+    setTokenSource(getAccessToken)
+    vi.unstubAllGlobals()
+    vi.stubGlobal('browser', fakeBrowser)
+  })
+
+  it('logs what the page spent when Gmail refuses a call for quota', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(QUOTA_ERROR, { status: 403 })))
+    await expect(gmailFetch('meter-single@x', '/threads/t1?format=full')).rejects.toThrow('403')
+    await expect.poll(quotaLines).toHaveLength(1)
+    expect((await quotaLines())[0]).toContain('limit hit on meter-single@x')
+    expect((await quotaLines())[0]).toContain('threads.get(full) x1=120')
+  })
+
+  it('counts each request of a batch and notices one refused inside it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      answerBatches(
+        vi.fn(async (url: string) =>
+          url.endsWith('/threads/b')
+            ? Response.json(QUOTA_ERROR, { status: 403 })
+            : Response.json({ id: 'a', messages: [] }),
+        ),
+      ),
+    )
+    await gmailBatchGet('meter-batch@x', ['/threads/a', '/threads/b'])
+    await expect.poll(quotaLines).toHaveLength(1)
+    expect((await quotaLines())[0]).toContain('threads.get x2=80')
+  })
+
+  it('stays quiet when nothing is refused', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ historyId: '1' })))
+    await gmailFetch('meter-quiet@x', '/profile')
+    expect(await quotaLines()).toEqual([])
+  })
+})
+
+describe('when a thread fails to load', () => {
     const PARTIAL = 'partial@gmail.com'
     let broken: boolean
     let t2History: string
