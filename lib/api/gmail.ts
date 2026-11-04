@@ -641,21 +641,38 @@ async function getInbox(account: string): Promise<RSSInfo> {
     `/threads?labelIds=INBOX&labelIds=UNREAD&maxResults=${MAX_THREADS}`,
   )
   const listed = list.threads ?? []
+  const failed = new Set<string>()
   const entries = await mapLimit(listed, 5, async ({ id, historyId }) => {
     const cached = cache?.threads[id]
     if (cached && cached.historyId === historyId) return [id, cached] as const
-    const { feed, mail } = await buildThread(account, await fetchThread(account, id))
-    builtMail.set(feed.url, mail)
-    return [id, { historyId, feed }] as const
+    try {
+      const { feed, mail } = await buildThread(account, await fetchThread(account, id))
+      builtMail.set(feed.url, mail)
+      return [id, { historyId, feed }] as const
+    } catch (err) {
+      // Discarding the threads that did load would fetch them all again on
+      // every poll. A cached entry keeps its old historyId, so it's retried too.
+      failed.add(id)
+      void debugLog('getInbox: thread failed ->', id, String(err))
+      return cached ? ([id, cached] as const) : null
+    }
   })
+  const loaded = entries.filter((it) => it !== null)
   const next: InboxCache = {
     version: INBOX_CACHE_VERSION,
-    historyId: profile.historyId,
-    threads: Object.fromEntries(entries),
-    order: listed.map((it) => it.id),
+    // No match for any profile: the next poll lists again to retry what failed.
+    historyId: failed.size ? '' : profile.historyId,
+    threads: Object.fromEntries(loaded),
+    order: loaded.map(([id]) => id),
   }
   await writeInboxCache(account, next)
-  return { email: account, feeds: next.order.map((id) => next.threads[id]!.feed) }
+  return {
+    email: account,
+    feeds: next.order.map((id) => next.threads[id]!.feed),
+    // StateManager keeps what it has of a failed account, so a mail this poll
+    // couldn't load neither disappears nor notifies again when it comes back.
+    ...(failed.size > 0 && { failed: true }),
+  }
 }
 
 export async function checkLoginStatus(): Promise<boolean> {

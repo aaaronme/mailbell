@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeBrowser } from '@webext-core/fake-browser'
 import {
   CURRENT_EXTRACT_VERSION,
+  clearInboxCache,
   composeUrl,
   decodeBase64Url,
   getAllRSS,
@@ -281,6 +282,76 @@ describe('Gmail API calls', () => {
 
     fetchMock.mockImplementation(async () => new Response('backend error', { status: 503 }))
     await expect(getAllRSS()).rejects.toThrow('503')
+  })
+
+  describe('when a thread fails to load', () => {
+    const PARTIAL = 'partial@gmail.com'
+    let broken: boolean
+    let t2History: string
+
+    beforeEach(async () => {
+      broken = true
+      t2History = '100'
+      await clearInboxCache(PARTIAL)
+      await fakeBrowser.storage.local.set({
+        oauthAccounts: [{ email: PARTIAL, refreshToken: 'r', accessToken: 'a', expiresAt: Date.now() + 3600_000 }],
+      })
+      fetchMock.mockImplementation(async (url: string) => {
+        const path = url.replace('https://gmail.googleapis.com/gmail/v1/users/me', '')
+        if (path === '/profile') return Response.json({ historyId: mailboxHistory })
+        if (path.startsWith('/threads?')) {
+          return Response.json({
+            threads: [
+              { id: 't1', historyId: '100' },
+              { id: 't2', historyId: t2History },
+            ],
+          })
+        }
+        if (path.startsWith('/threads/t1?')) return Response.json(thread)
+        return broken ? new Response('backend error', { status: 500 }) : Response.json({ ...thread, id: 't2' })
+      })
+    })
+
+    it('keeps what loaded and retries only that thread, until it loads', async () => {
+      const [first] = await getAllRSS()
+      expect(first!.failed).toBe(true)
+      expect(first!.feeds.map((it) => it.url)).toEqual([threadUrl(PARTIAL, 't1')])
+
+      fetchMock.mockClear()
+      await getAllRSS()
+      expect(calledPaths()).toEqual(['/profile', '/threads', '/threads/t2'])
+
+      fetchMock.mockClear()
+      broken = false
+      const [fixed] = await getAllRSS()
+      expect(calledPaths()).toEqual(['/profile', '/threads', '/threads/t2'])
+      expect(fixed!.failed).toBeUndefined()
+      expect(fixed!.feeds.map((it) => it.url)).toEqual([threadUrl(PARTIAL, 't1'), threadUrl(PARTIAL, 't2')])
+
+      fetchMock.mockClear()
+      await getAllRSS()
+      expect(calledPaths()).toEqual(['/profile'])
+    })
+
+    it('keeps showing a thread whose update fails, and retries it', async () => {
+      broken = false
+      await getAllRSS()
+
+      broken = true
+      t2History = '101'
+      mailboxHistory = '701'
+      fetchMock.mockClear()
+      const [inbox] = await getAllRSS()
+      expect(inbox!.failed).toBe(true)
+      expect(inbox!.feeds.map((it) => it.url)).toEqual([threadUrl(PARTIAL, 't1'), threadUrl(PARTIAL, 't2')])
+      expect(calledPaths()).toEqual(['/profile', '/threads', '/threads/t2'])
+
+      broken = false
+      fetchMock.mockClear()
+      const [fixed] = await getAllRSS()
+      expect(fixed!.failed).toBeUndefined()
+      expect(calledPaths()).toEqual(['/profile', '/threads', '/threads/t2'])
+    })
   })
 
   it('skips accounts that need a fresh sign-in', async () => {
