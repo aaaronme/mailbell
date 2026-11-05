@@ -192,7 +192,14 @@ function Toolbar() {
           ?view=tab tells main.tsx not to pin the popup width. */}
       {accounts.length > 0 && (
         <Button asChild size="sm" variant="secondary">
-          <a href={browser.runtime.getURL('/popup.html?view=tab')} target="_blank">
+          <a
+            href={browser.runtime.getURL('/popup.html?view=tab')}
+            target="_blank"
+            onClick={(e) => {
+              e.preventDefault()
+              void browser.tabs.create({ url: e.currentTarget.href }).then(() => window.close())
+            }}
+          >
             <SquareArrowOutUpRightIcon />
             Open in tab
           </a>

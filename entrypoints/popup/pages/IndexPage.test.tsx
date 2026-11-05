@@ -75,6 +75,22 @@ describe('IndexPage', () => {
     await expect.element(link).toHaveAttribute('target', '_blank')
   })
 
+  it('closes the popup once the mail client has opened in a tab', async () => {
+    await browser.storage.local.set({ accounts: ['a@example.com'], threads: [] })
+    const openTab = vi.spyOn(fakeBrowser.tabs, 'create').mockResolvedValue({} as never)
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {})
+    openTab.mockClear()
+    close.mockClear()
+    const screen = await render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={createAppRouter(['/'])} />
+      </QueryClientProvider>,
+    )
+    await screen.getByRole('link', { name: 'Open in tab' }).click()
+    expect(openTab).toHaveBeenCalledWith({ url: browser.runtime.getURL('/popup.html?view=tab') })
+    await expect.poll(() => close.mock.calls.length).toBe(1)
+  })
+
   it('refresh button pulls fresh state directly instead of depending solely on the background push', async () => {
     // Regression test: the refresh button used to only send 'refreshThreads'
     // and wait for background's 'refreshPopup' push, which is lost if the
