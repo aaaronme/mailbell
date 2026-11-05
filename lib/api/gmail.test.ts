@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeBrowser } from '@webext-core/fake-browser'
 import { answerBatches } from './batch.testing'
 import { getDebugLogs } from '../debugLog'
+import { quotaMeter } from './quotaMeter'
 import {
   CURRENT_EXTRACT_VERSION,
   clearInboxCache,
@@ -21,6 +22,7 @@ import {
   parseThreadUrl,
   threadToFeed,
   threadToMail,
+  isQuotaError,
   threadUrl,
   type GmailMessage,
   type GmailPart,
@@ -266,6 +268,14 @@ describe('Gmail API calls', () => {
     expect(calledPaths()).toEqual(['/profile', '/threads'])
   })
 
+  it('leaves an account alone while its quota is out, keeping what the poll has', async () => {
+    quotaMeter.limitHit(ACCOUNT)
+    const [inbox] = await getAllRSS()
+    quotaMeter.clear(ACCOUNT)
+    expect(inbox).toEqual({ email: ACCOUNT, feeds: [], failed: true })
+    expect(calledPaths()).toEqual([])
+  })
+
   it('marks one failing account failed instead of failing the poll', async () => {
     await fakeBrowser.storage.local.set({
       oauthAccounts: [
@@ -322,6 +332,25 @@ describe('Gmail API calls', () => {
     await gmailBatchGet('meter-batch@x', ['/threads/a', '/threads/b'])
     await expect.poll(quotaLines).toHaveLength(1)
     expect((await quotaLines())[0]).toContain('threads.get x2=80')
+  })
+
+  it('pauses the account on a refusal and resumes once Gmail answers', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(QUOTA_ERROR, { status: 403 })))
+    await expect(gmailFetch('meter-pause@x', '/profile')).rejects.toThrow('403')
+    expect(quotaMeter.paused('meter-pause@x')).toBe(true)
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ historyId: '1' })))
+    await gmailFetch('meter-pause@x', '/profile')
+    expect(quotaMeter.paused('meter-pause@x')).toBe(false)
+  })
+
+  it('tells a quota refusal from other errors', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(QUOTA_ERROR, { status: 403 })))
+    const refused = await gmailFetch('meter-kind@x', '/profile').catch((err) => err)
+    expect(isQuotaError(refused)).toBe(true)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('forbidden', { status: 403 })))
+    const other = await gmailFetch('meter-kind@x', '/profile').catch((err) => err)
+    expect(isQuotaError(other)).toBe(false)
+    expect(isQuotaError(new Error('Quota exceeded'))).toBe(false)
   })
 
   it('stays quiet when nothing is refused', async () => {

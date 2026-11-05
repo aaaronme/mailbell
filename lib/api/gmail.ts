@@ -144,6 +144,7 @@ export function setTokenSource(source: TokenSource): void {
 
 const RETRY_DEFAULT_MS = 2000
 const RETRY_MAX_MS = 10_000
+const OUT_OF_QUOTA = /rateLimitExceeded|quota exceeded/i
 
 // Gmail answers a burst with 429, or with 403 and a rate-limit reason.
 async function isRateLimited(resp: Response): Promise<boolean> {
@@ -159,8 +160,11 @@ async function isOutOfQuota(resp: Response): Promise<boolean> {
   if (resp.status === 429) return true
   if (resp.status !== 403) return false
   const text = await resp.clone().text().catch(() => '')
-  return /rateLimitExceeded|quota exceeded/i.test(text)
+  return OUT_OF_QUOTA.test(text)
 }
+
+export const isQuotaError = (err: unknown): boolean =>
+  err instanceof GmailApiError && (err.status === 429 || (err.status === 403 && OUT_OF_QUOTA.test(err.message)))
 
 function retryDelay(resp: Response): number {
   const seconds = Number(resp.headers.get('Retry-After') ?? NaN)
@@ -213,6 +217,7 @@ export async function gmailFetch<T>(account: string, path: string, init: Request
   const request = `${init.method ?? 'GET'} ${path}`
   const resp = await authorizedFetch(account, `${API}${path}`, init, [request])
   if (!resp.ok) throw await apiError(resp, request)
+  quotaMeter.clear(account)
   return (resp.status === 204 ? undefined : await resp.json()) as T
 }
 
@@ -264,14 +269,20 @@ export async function gmailBatchGet<T>(
     if (!resp.ok) throw await apiError(resp, 'batch')
     const answers = batchAnswers(resp.headers.get('Content-Type') ?? '', await resp.text())
     const retry: number[] = []
+    // The envelope is a 200 whatever its answers say.
+    let refused = false
     for (const i of pending) {
       const answer = answers.get(i) ?? new Response(null, { status: 502 })
-      if (await isOutOfQuota(answer)) quotaMeter.limitHit(account)
+      if (await isOutOfQuota(answer)) {
+        refused = true
+        quotaMeter.limitHit(account)
+      }
       if (answer.ok) results[i] = (await answer.json()) as T
       else if (round === 0 && (await isRateLimited(answer))) retry.push(i)
       else results[i] = await apiError(answer, `GET ${paths[i]}`)
     }
     if (retry.length) await new Promise((r) => setTimeout(r, RETRY_DEFAULT_MS))
+    else if (!refused) quotaMeter.clear(account)
     pending = retry
   }
   return results
@@ -657,6 +668,8 @@ async function buildThread(account: string, thread: GmailThread): Promise<{ feed
 }
 
 async function getInbox(account: string): Promise<RSSInfo> {
+  // StateManager keeps a failed account's threads until the next poll.
+  if (quotaMeter.paused(account)) return { email: account, feeds: [], failed: true }
   const profile = await gmailFetch<{ historyId: string }>(account, '/profile')
   const cache = await readInboxCache(account)
   if (cache && cache.historyId === profile.historyId) {

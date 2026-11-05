@@ -1,5 +1,12 @@
 import { useCallback, useMemo } from 'react'
-import { queryOptions, type InfiniteData, useInfiniteQuery, useQueries, useQuery } from '@tanstack/react-query'
+import {
+  queryOptions,
+  type InfiniteData,
+  useInfiniteQuery,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query'
 import { getOpenThread, listLabels, listThreadPage, type GmailLabel, type ThreadRow } from '../api/mailbox'
 import { parseThreadUrl } from '../api/gmail'
 import type { MailSearch } from './search'
@@ -79,6 +86,7 @@ export const allInboxesKey = (query: ReturnType<typeof listQuery>, accounts: str
 // Search in All inboxes searches every account. A failed account counts as
 // exhausted so the others still show, unless none answer at all.
 function useAllInboxes(search: MailSearch, enabled: boolean): ThreadListResult {
+  const queryClient = useQueryClient()
   const query = listQuery('INBOX', { category: search.cat, q: search.q, unread: search.unread })
   const accountsQuery = useAccounts()
   const accounts = useMemo(() => (accountsQuery.data ?? []).map((it) => it.email), [accountsQuery.data])
@@ -122,6 +130,20 @@ function useAllInboxes(search: MailSearch, enabled: boolean): ThreadListResult {
       )
     },
     select,
+    // The accounts' own lists, until this one answers. Null tokens, so nothing
+    // pages on from them.
+    placeholderData: enabled
+      ? (): InfiniteData<AllInboxesPage, AllPageParam> | undefined => {
+          const rows = accounts.flatMap(
+            (it) =>
+              queryClient
+                .getQueryData<InfiniteData<{ rows: ThreadRow[] }>>(mailKeys.list(it, 'INBOX', query))
+                ?.pages.flatMap((page) => page.rows) ?? [],
+          )
+          if (!rows.length) return undefined
+          return { pages: [{ rows, tokens: Object.fromEntries(accounts.map((it) => [it, null])) }], pageParams: [{}] }
+        }
+      : undefined,
     enabled: enabled && accountsQuery.isSuccess,
     ...LIVE_LIST,
   })
@@ -139,6 +161,7 @@ const NO_LIST: ThreadRow[] = []
 
 export function useThreadList(search: MailSearch): ThreadListResult {
   const { account, folder, cat, q, unread } = search
+  const queryClient = useQueryClient()
   const query = listQuery(folder, { category: cat, q, unread })
   // Hooks can't be conditional, so each source is enabled only for its own case.
   const all = useAllInboxes(search, account === 'all')
@@ -147,6 +170,17 @@ export function useThreadList(search: MailSearch): ThreadListResult {
     queryFn: ({ pageParam, signal }) => listThreadPage(account, query, pageParam, signal),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextPageToken,
+    // This account's rows from All inboxes, until its own list answers.
+    placeholderData:
+      account !== 'all' && folder === 'INBOX'
+        ? () => {
+            const [[, all] = []] = queryClient
+              .getQueriesData<InfiniteData<AllInboxesPage>>({ queryKey: mailKeys.list('all', 'INBOX', query) })
+              .filter(([, data]) => data)
+            const rows = all?.pages.flatMap((page) => page.rows).filter((it) => it.account === account)
+            return rows?.length ? { pages: [{ rows, nextPageToken: undefined }], pageParams: [undefined] } : undefined
+          }
+        : undefined,
     enabled: account !== 'all',
     ...LIVE_LIST,
   })

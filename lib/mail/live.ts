@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import type { Query } from '@tanstack/react-query'
 import { mapLimit } from '../api/gmail'
+import { quotaMeter } from '../api/quotaMeter'
 import {
   getProfile,
   getThreadRowWithLabels,
@@ -206,6 +207,8 @@ export function createLiveChecker(accounts: () => string[]) {
   }
 
   async function check(account: string) {
+    // The history cursor stays put, so the next check catches up.
+    if (quotaMeter.paused(account)) return
     const { historyId } = await getProfile(account)
     const last = lastHistoryId.get(account)
     if (last === undefined || last === historyId) {

@@ -1,4 +1,5 @@
 import { fakeBrowser } from '@webext-core/fake-browser'
+import { quotaMeter } from '../api/quotaMeter'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getAccessToken } from '../auth/oauth'
 import { setTokenSource } from '../api/gmail'
@@ -48,7 +49,7 @@ describe('bootstrapCorrespondents', () => {
       const path = u.pathname.split('/users/me')[1]
       if (path === '/messages') {
         expect(u.searchParams.get('labelIds')).toBe('SENT')
-        expect(u.searchParams.get('maxResults')).toBe('200')
+        expect(u.searchParams.get('maxResults')).toBe('100')
         return Response.json({ messages: [{ id: 'm1' }, { id: 'm2' }] })
       }
       expect(u.searchParams.get('format')).toBe('metadata')
@@ -87,6 +88,30 @@ describe('bootstrapCorrespondents', () => {
     await bootstrapCorrespondents(A)
     expect(fetchMock.mock.calls.length).toBeGreaterThan(before)
     expect((await fakeBrowser.storage.local.get('correspondentsBootstrapped')).correspondentsBootstrapped).toEqual([A])
+  })
+  it('keeps what it read before failing', async () => {
+    setTokenSource(async () => 'T')
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname.split('/users/me')[1]
+        if (path === '/messages') return Response.json({ messages: [{ id: 'm1' }, { id: 'm2' }] })
+        if (path === '/messages/m2') return new Response('nope', { status: 500 })
+        return Response.json({ payload: { headers: [{ name: 'To', value: 'kept@x.com' }] } })
+      }),
+    )
+    await expect(bootstrapCorrespondents(A)).rejects.toThrow()
+    expect([...(await getCorrespondents(A))]).toEqual(['kept@x.com'])
+  })
+  it('waits while the quota is out', async () => {
+    setTokenSource(async () => 'T')
+    const fetchMock = vi.fn(async () => Response.json({}))
+    vi.stubGlobal('fetch', fetchMock)
+    quotaMeter.limitHit(A)
+    await bootstrapCorrespondents(A)
+    quotaMeter.clear(A)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect((await fakeBrowser.storage.local.get('correspondentsBootstrapped')).correspondentsBootstrapped).toBeUndefined()
   })
   it('shares one fetch between concurrent callers', async () => {
     setTokenSource(async () => 'T')

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderHook } from 'vitest-browser-react'
 import { getAccessToken, OAuthError } from '../auth/oauth'
 import { setTokenSource } from '../api/gmail'
+import { quotaMeter } from '../api/quotaMeter'
 import { debugLog } from '../debugLog'
 import { FAST_POLL_MS } from '../fastPoll'
 import type { HistoryRecord, ThreadRow } from '../api/mailbox'
@@ -390,6 +391,19 @@ describe('live updates', () => {
       })
       await checkNow()
       expect(debugLog).toHaveBeenCalledTimes(2)
+    })
+
+    it('asks nothing while the quota is out, and catches up after', async () => {
+      const { checkNow } = live.createLiveChecker(() => [ME])
+      await checkNow()
+      fetchMock.mockClear()
+      profileId = String(Number(profileId) + 1)
+      quotaMeter.limitHit(ME)
+      await checkNow()
+      expect(fetchMock).not.toHaveBeenCalled()
+      quotaMeter.clear(ME)
+      await checkNow()
+      expect(calls('/history')).toHaveLength(1)
     })
 
     it('runs once more after a run that calls arrived during, not once per call', async () => {

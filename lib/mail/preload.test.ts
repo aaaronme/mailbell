@@ -4,6 +4,7 @@ import { createElement, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { setTokenSource, threadUrl } from '../api/gmail'
 import type { ThreadRow } from '../api/mailbox'
+import { quotaMeter } from '../api/quotaMeter'
 import { preloadTargets, usePreload } from './preload'
 
 const ids = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`)
@@ -12,17 +13,16 @@ describe('preloadTargets', () => {
   it('puts the neighbours nearest first, then the first rows', () => {
     const all = ids(30)
     const out = preloadTargets(all, 12)
-    expect(out).toEqual([...[13, 11, 14, 10, 15, 9].map((i) => all[i]), ...all.slice(0, 9)])
-    expect(out).toHaveLength(15)
+    expect(out).toEqual([all[13], all[11], ...all.slice(0, 3)])
   })
 
   it('is the first rows alone with nothing selected', () => {
-    expect(preloadTargets(ids(5), -1)).toEqual(ids(5))
-    expect(preloadTargets(ids(30), -1)).toEqual(ids(10))
+    expect(preloadTargets(ids(2), -1)).toEqual(ids(2))
+    expect(preloadTargets(ids(30), -1)).toEqual(ids(3))
   })
 
   it('stays inside the list near its edges', () => {
-    expect(preloadTargets(ids(4), 3)).toEqual(['t2', 't1', 't0'])
+    expect(preloadTargets(ids(4), 3)).toEqual(['t2', 't0', 't1'])
   })
 })
 
@@ -77,10 +77,18 @@ describe('usePreload', () => {
     await vi.waitFor(() => expect(paths.length).toBe(2))
     for (let i = 0; i < 8; i++) await drain()
     expect(peak).toBe(2)
-    expect(paths.length).toBe(5)
+    expect(paths.length).toBe(3)
     expect(paths.every((it) => it.startsWith('GET /threads/'))).toBe(true)
     expect(paths.some((it) => it.includes('/modify'))).toBe(false)
     expect(paths).not.toContain('GET /threads/t2')
+  })
+
+  it('leaves an account alone while its quota is out', async () => {
+    quotaMeter.limitHit(A)
+    await mount(ids(6).map(row))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(paths).toEqual([])
+    quotaMeter.clear(A)
   })
 
   it('abandons queued loads when the targets change', async () => {

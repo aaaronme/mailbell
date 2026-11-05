@@ -1,6 +1,7 @@
 import { queryOptions, useQuery } from '@tanstack/react-query'
 import { useMemo } from 'react'
 import { gmailFetch, header, mapLimit, parseAddressField, parseMailbox, type GmailPart } from '../api/gmail'
+import { quotaMeter } from '../api/quotaMeter'
 import { registrableDomain } from './identity'
 
 const KEY = 'correspondents'
@@ -50,7 +51,8 @@ const readBootstrapped = async () =>
 
 const inFlight = new Map<string, Promise<void>>()
 
-// Seeds the store from the last 200 Sent messages, once per account.
+// Seeds the store from the last 100 Sent messages, once per account: 2,000 units,
+// a third of a user's minute, so it goes slowly and stops at the first failure.
 export function bootstrapCorrespondents(account: string): Promise<void> {
   let running = inFlight.get(account)
   if (!running) {
@@ -61,21 +63,32 @@ export function bootstrapCorrespondents(account: string): Promise<void> {
 }
 
 async function seed(account: string): Promise<void> {
-  if ((await readBootstrapped()).includes(account)) return
+  if (quotaMeter.paused(account) || (await readBootstrapped()).includes(account)) return
   const { messages = [] } = await gmailFetch<{ messages?: { id: string }[] }>(
     account,
-    '/messages?labelIds=SENT&maxResults=200',
+    '/messages?labelIds=SENT&maxResults=100',
   )
-  const recipients = await mapLimit(messages, 4, async ({ id }) => {
-    const message = await gmailFetch<{ payload: GmailPart }>(
-      account,
-      `/messages/${id}?format=metadata&metadataHeaders=To&metadataHeaders=Cc`,
-    )
-    return ['To', 'Cc'].flatMap((name) =>
-      parseAddressField(header(message.payload, name) ?? '').map((it) => parseMailbox(it).email),
-    )
+  const recipients: string[] = []
+  let failure: unknown
+  await mapLimit(messages, 2, async ({ id }) => {
+    if (failure) return
+    try {
+      const message = await gmailFetch<{ payload: GmailPart }>(
+        account,
+        `/messages/${id}?format=metadata&metadataHeaders=To&metadataHeaders=Cc`,
+      )
+      recipients.push(
+        ...['To', 'Cc'].flatMap((name) =>
+          parseAddressField(header(message.payload, name) ?? '').map((it) => parseMailbox(it).email),
+        ),
+      )
+    } catch (err) {
+      failure = err
+    }
   })
-  await addCorrespondents(account, recipients.flat())
+  // What was read counts even if the scan didn't finish; it starts over next time.
+  await addCorrespondents(account, recipients)
+  if (failure) throw failure
   await serialised(async () =>
     browser.storage.local.set({ [BOOTSTRAPPED_KEY]: [...new Set([...(await readBootstrapped()), account])] }),
   )

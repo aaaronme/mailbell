@@ -95,6 +95,10 @@ function threadToRow(account: string, thread: GmailThread): ThreadRow {
   }
 }
 
+// Each thread's row as of its historyId. Listing says a thread's current one for
+// a fraction of what its row costs, and any change to a thread moves it.
+const knownRows = new Map<string, { historyId: string; row: ThreadRow }>()
+
 const CATEGORY_OF = new Map(Object.entries(CATEGORY_LABEL).map(([category, label]) => [label, category]))
 
 export async function listThreadPage(
@@ -105,7 +109,7 @@ export async function listThreadPage(
 ): Promise<{ rows: ThreadRow[]; nextPageToken?: string }> {
   // A short first page shows mail sooner; the list's sentinel asks for the
   // next one straight after.
-  const params = new URLSearchParams({ maxResults: pageToken ? '50' : '15' })
+  const params = new URLSearchParams({ maxResults: pageToken ? '25' : '15' })
   query.labelIds.forEach((it) => params.append('labelIds', it))
   // labelIds can only require labels; leaving some out takes a search.
   const excluded = query.excludeLabelIds?.map((label) => `-category:${CATEGORY_OF.get(label)}`)
@@ -113,25 +117,40 @@ export async function listThreadPage(
   if (q) params.set('q', q)
   if (query.includeSpamTrash) params.set('includeSpamTrash', 'true')
   if (pageToken) params.set('pageToken', pageToken)
-  const list = await gmailFetch<{ threads?: { id: string }[]; nextPageToken?: string }>(
+  const list = await gmailFetch<{ threads?: { id: string; historyId?: string }[]; nextPageToken?: string }>(
     account,
     `/threads?${params}`,
     { signal },
   )
-  const ids = (list.threads ?? []).map((it) => it.id)
-  const rows: ThreadRow[] = []
-  // Each row costs its own 40-unit metadata fetch, batched or not.
-  for (let at = 0; at < ids.length; at += 20) {
-    const chunk = ids.slice(at, at + 20)
-    const threads = await gmailBatchGet<GmailThread>(account, chunk.map(rowPath), signal)
-    for (const thread of threads) {
-      // Deleted between the list and its rows: just gone.
-      if (isNotFound(thread)) continue
-      if (isApiError(thread)) throw thread
-      rows.push(threadToRow(account, thread))
-    }
+  const listed = list.threads ?? []
+  const keyOf = (id: string) => `${account}\n${id}`
+  const rows = new Map<string, ThreadRow>()
+  for (const { id, historyId } of listed) {
+    const known = knownRows.get(keyOf(id))
+    if (known && known.historyId === historyId) rows.set(id, known.row)
   }
-  return { rows, nextPageToken: list.nextPageToken }
+  const missing = listed.filter((it) => !rows.has(it.id))
+  // Each row costs its own 40-unit metadata fetch, batched or not.
+  for (let at = 0; at < missing.length; at += 20) {
+    const chunk = missing.slice(at, at + 20)
+    const threads = await gmailBatchGet<GmailThread>(account, chunk.map((it) => rowPath(it.id)), signal)
+    let failure: unknown
+    threads.forEach((thread, i) => {
+      // Deleted between the list and its rows: just gone.
+      if (isNotFound(thread)) return
+      if (isApiError(thread)) {
+        failure ??= thread
+        return
+      }
+      const { id, historyId } = chunk[i]!
+      const row = threadToRow(account, thread)
+      rows.set(id, row)
+      if (historyId) knownRows.set(keyOf(id), { historyId, row })
+    })
+    // Thrown only now, so a retry doesn't pay again for the rows that loaded.
+    if (failure) throw failure
+  }
+  return { rows: listed.flatMap((it) => rows.get(it.id) ?? []), nextPageToken: list.nextPageToken }
 }
 
 const ROW_METADATA = ROW_HEADERS.map((it) => `metadataHeaders=${it}`).join('&')

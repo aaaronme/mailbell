@@ -62,6 +62,71 @@ describe('mailbox api', () => {
     expect(row.date).toBe(new Date(2000).toISOString())
   })
 
+  describe('listThreadPage on a thread it has fetched before', () => {
+    const query = { labelIds: ['INBOX'], includeSpamTrash: false }
+    let historyId: string | undefined
+    let ids: string[]
+    const rowFetches = () =>
+      fetchMock.mock.calls.filter(([url]) => new URL(url).pathname.includes('/threads/')).length
+
+    beforeEach(() => {
+      historyId = '5'
+      ids = ['t1']
+      fetchMock.mockImplementation(async (url: string) => {
+        const path = new URL(url).pathname.split('/users/me')[1]!
+        if (path === '/threads') return Response.json({ threads: ids.map((id) => ({ id, historyId })) })
+        const id = path.slice('/threads/'.length)
+        if (id === 'bad') return new Response('nope', { status: 500 })
+        return Response.json({ id, messages: [msg('m1', 1000, `Ann <${id}@x.com>`, ['INBOX'], 'text/plain')] })
+      })
+    })
+
+    it('reuses the row while the thread has not changed', async () => {
+      const first = await listThreadPage('reuse@x', query)
+      expect(rowFetches()).toBe(1)
+      const second = await listThreadPage('reuse@x', { labelIds: ['STARRED'], includeSpamTrash: false })
+      expect(rowFetches()).toBe(1)
+      expect(second.rows).toEqual(first.rows)
+    })
+
+    it('fetches it again once the thread has changed', async () => {
+      await listThreadPage('changed@x', query)
+      historyId = '6'
+      await listThreadPage('changed@x', query)
+      expect(rowFetches()).toBe(2)
+    })
+
+    it('keeps the list order with new mail on top of reused rows', async () => {
+      await listThreadPage('order@x', query)
+      ids = ['t2', 't1']
+      const { rows } = await listThreadPage('order@x', query)
+      expect(rows.map((it) => it.threadId)).toEqual(['t2', 't1'])
+      expect(rowFetches()).toBe(2)
+    })
+
+    it('does not mix up accounts', async () => {
+      await listThreadPage('one@x', query)
+      await listThreadPage('two@x', query)
+      expect(rowFetches()).toBe(2)
+    })
+
+    it('fetches every time when the list gives no historyId', async () => {
+      historyId = undefined
+      await listThreadPage('nohistory@x', query)
+      await listThreadPage('nohistory@x', query)
+      expect(rowFetches()).toBe(2)
+    })
+
+    it('keeps the rows that loaded when another in the batch fails', async () => {
+      ids = ['t1', 'bad']
+      await expect(listThreadPage('partial@x', query)).rejects.toThrow('500')
+      ids = ['t1']
+      fetchMock.mockClear()
+      await listThreadPage('partial@x', query)
+      expect(rowFetches()).toBe(0)
+    })
+  })
+
   it('listThreadPage leaves out excluded categories', async () => {
     await listThreadPage('me@gmail.com', {
       labelIds: ['INBOX'],
@@ -81,7 +146,7 @@ describe('mailbox api', () => {
       .map(([url]) => new URL(url))
       .filter((it) => it.pathname.endsWith('/threads'))
       .map((it) => it.searchParams.get('maxResults'))
-    expect(sizes).toEqual(['15', '50'])
+    expect(sizes).toEqual(['15', '25'])
   })
 
   it('listThreadPage fetches its rows in batches of 20, skipping any already gone', async () => {

@@ -4,6 +4,9 @@ const WINDOW_MS = 60_000
 // A project created since May 2026 gets 6,000 units per user per minute, so
 // half of that is worth a line even before Gmail refuses anything.
 const HIGH_USE_UNITS = 3_000
+// How long background work leaves an account alone after each refusal in a row.
+// The quota refills over a minute, so the last step outlasts that.
+const PAUSES_MS = [30_000, 60_000, 120_000]
 
 // What each call costs. First match wins, so a path's longer forms go first.
 // https://developers.google.com/workspace/gmail/api/reference/quota
@@ -48,6 +51,9 @@ const pageName = () => `${location.pathname}${location.hash} ${PAGE_ID}`
 export function createQuotaMeter(log: (line: string) => void, now: () => number = Date.now) {
   const sent = new Map<string, Sent[]>()
   const reportedAt = new Map<string, number>()
+  const pauses = new Map<string, { until: number; strikes: number }>()
+
+  const paused = (account: string) => (pauses.get(account)?.until ?? -Infinity) > now()
 
   function report(account: string, why: string) {
     const last = reportedAt.get(account)
@@ -84,7 +90,17 @@ export function createQuotaMeter(log: (line: string) => void, now: () => number 
       sent.set(account, recent)
       if (recent.reduce((sum, it) => sum + it.units, 0) >= HIGH_USE_UNITS) report(account, 'high use on')
     },
-    limitHit: (account: string) => report(account, 'limit hit on'),
+    limitHit(account: string) {
+      report(account, 'limit hit on')
+      // A batch is refused many times over at once; that is one strike.
+      if (paused(account)) return
+      const strikes = pauses.get(account)?.strikes ?? 0
+      pauses.set(account, { until: now() + PAUSES_MS[Math.min(strikes, PAUSES_MS.length - 1)]!, strikes: strikes + 1 })
+    },
+    // Only for work nobody is waiting on: what the user asks for still goes,
+    // and its answer is what ends a pause early.
+    paused,
+    clear: (account: string) => void pauses.delete(account),
   }
 }
 

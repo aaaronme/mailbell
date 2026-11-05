@@ -76,6 +76,30 @@ describe('createQuotaMeter', () => {
     expect(lines).toHaveLength(3)
   })
 
+  it('pauses an account after a refusal, for longer each time, up to a cap', () => {
+    expect(meter.paused('a@x')).toBe(false)
+    for (const seconds of [30, 60, 120, 120]) {
+      meter.limitHit('a@x')
+      expect(meter.paused('a@x')).toBe(true)
+      expect(meter.paused('b@x')).toBe(false)
+      time += seconds * 1000 - 1
+      expect(meter.paused('a@x')).toBe(true)
+      time += 1
+      expect(meter.paused('a@x')).toBe(false)
+    }
+  })
+
+  it('starts over once Gmail answers again', () => {
+    meter.limitHit('a@x')
+    time += 30_000
+    meter.limitHit('a@x')
+    meter.clear('a@x')
+    expect(meter.paused('a@x')).toBe(false)
+    meter.limitHit('a@x')
+    time += 30_000
+    expect(meter.paused('a@x')).toBe(false)
+  })
+
   it('reports heavy use before Gmail refuses anything', () => {
     meter.record('a@x', Array.from({ length: 24 }, (_, i) => `GET /threads/t${i}?format=full`))
     expect(lines).toHaveLength(0)

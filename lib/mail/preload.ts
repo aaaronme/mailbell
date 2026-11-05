@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ThreadRow } from '../api/mailbox'
+import { quotaMeter } from '../api/quotaMeter'
 import { threadOptions } from './queries'
 
-const FIRST = 10
-const REACH = 3
+// An open thread costs 120 units, so this is what a list spends unasked: at most
+// 5 x 120 of the 6,000 a user gets per minute.
+const FIRST = 3
+const REACH = 1
 const CONCURRENCY = 2
 
 // The rows worth having ready: those around the selection, nearest first, then
@@ -32,7 +35,7 @@ export function usePreload(rows: ThreadRow[], selectedUrl?: string) {
     const pump = () => {
       while (state.active < CONCURRENCY && state.queue.length) {
         const options = threadOptions(state.queue.shift())
-        if (queryClient.getQueryState(options.queryKey)?.data) continue
+        if (queryClient.getQueryState(options.queryKey)?.data || quotaMeter.paused(options.queryKey[2])) continue
         state.active++
         void queryClient.prefetchQuery(options).finally(() => {
           state.active--
