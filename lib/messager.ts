@@ -41,6 +41,8 @@ export const popupMessager = defineExtensionMessaging<{
   // background to popout tab: show this thread and focus the tab -> true if a
   // popout answered
   openThread(url: string): boolean
+  // any view to the mail tab: come forward -> true if a mail tab answered
+  focusMailTab(): boolean
 }>()
 
 // Messaging rethrows a handler's error as a plain Error with the same message,

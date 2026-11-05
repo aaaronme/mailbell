@@ -5,13 +5,35 @@ import { defaultParseSearch } from '@tanstack/react-router'
 vi.stubGlobal('browser', fakeBrowser)
 vi.stubGlobal('chrome', fakeBrowser)
 
-const { openPopoutOn, popoutUrl } = await import('./openPopout')
+const { openMailTab, openPopoutOn, popoutUrl } = await import('./openPopout')
 const { popupMessager } = await import('./messager')
 const { validateMailSearch } = await import('@/entrypoints/popup/popout/mailSearch')
 
 // Every reserved character a URL can carry, to prove the hash survives them.
 const threadUrl = 'https://mail.google.com/mail/?authuser=a%40b.com&x=1#inbox/FMfcg?a=b&c=d#e'
 const account = 'a@b.com'
+
+describe('openMailTab', () => {
+  beforeEach(() => {
+    fakeBrowser.reset()
+    vi.restoreAllMocks()
+  })
+
+  it('brings an open mail tab forward instead of opening another', async () => {
+    const send = vi.spyOn(popupMessager, 'sendMessage').mockResolvedValue(true as never)
+    const create = vi.spyOn(fakeBrowser.tabs, 'create')
+    await openMailTab()
+    expect(send).toHaveBeenCalledWith('focusMailTab', undefined)
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('opens one when none answers', async () => {
+    vi.spyOn(popupMessager, 'sendMessage').mockRejectedValue(new Error('no receiver'))
+    const create = vi.spyOn(fakeBrowser.tabs, 'create').mockResolvedValue({} as never)
+    await openMailTab()
+    expect(create).toHaveBeenCalledWith({ url: browser.runtime.getURL('/popup.html?view=tab') })
+  })
+})
 
 describe('openPopoutOn', () => {
   beforeEach(() => {

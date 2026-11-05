@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { openMailInWeb, newEmail, inboxUrl } from '@/lib/api/gmail'
 import { bgMessager } from '@/lib/messager'
+import { openMailTab } from '@/lib/openPopout'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
@@ -197,7 +198,7 @@ function Toolbar() {
             target="_blank"
             onClick={(e) => {
               e.preventDefault()
-              void browser.tabs.create({ url: e.currentTarget.href }).then(() => window.close())
+              void openMailTab().then(() => window.close())
             }}
           >
             <SquareArrowOutUpRightIcon />

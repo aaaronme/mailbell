@@ -12,6 +12,13 @@ export function popoutUrl(threadUrl: string): string {
   return `${browser.runtime.getURL('/popup.html')}?view=tab#/mail?${search}`
 }
 
+// The open mail tab comes forward; with none, one is opened.
+export async function openMailTab(): Promise<void> {
+  const reused = await popupMessager.sendMessage('focusMailTab', undefined).catch(() => false)
+  if (reused === true) return
+  await browser.tabs.create({ url: browser.runtime.getURL('/popup.html?view=tab') })
+}
+
 // An open popout tab navigates itself to the mail and focuses; with none
 // (the toolbar popup alone answers nothing, which Chrome reports as a
 // rejection and Firefox as undefined) a new tab is opened. With several

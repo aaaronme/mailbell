@@ -11,7 +11,7 @@ vi.stubGlobal('browser', fakeBrowser)
 vi.stubGlobal('chrome', fakeBrowser)
 
 const { createAppRouter } = await import('../router')
-const { bgMessager } = await import('@/lib/messager')
+const { bgMessager, popupMessager } = await import('@/lib/messager')
 
 function makeThread(url: string) {
   return {
@@ -89,6 +89,25 @@ describe('IndexPage', () => {
     await screen.getByRole('link', { name: 'Open in tab' }).click()
     expect(openTab).toHaveBeenCalledWith({ url: browser.runtime.getURL('/popup.html?view=tab') })
     await expect.poll(() => close.mock.calls.length).toBe(1)
+  })
+
+  it('brings an open mail tab forward rather than opening another', async () => {
+    await browser.storage.local.set({ accounts: ['a@example.com'], threads: [] })
+    const openTab = vi.spyOn(fakeBrowser.tabs, 'create').mockResolvedValue({} as never)
+    const close = vi.spyOn(window, 'close').mockImplementation(() => {})
+    const send = vi.spyOn(popupMessager, 'sendMessage').mockResolvedValue(true as never)
+    openTab.mockClear()
+    close.mockClear()
+    const screen = await render(
+      <QueryClientProvider client={new QueryClient()}>
+        <RouterProvider router={createAppRouter(['/'])} />
+      </QueryClientProvider>,
+    )
+    await screen.getByRole('link', { name: 'Open in tab' }).click()
+    await expect.poll(() => close.mock.calls.length).toBe(1)
+    expect(send).toHaveBeenCalledWith('focusMailTab', undefined)
+    expect(openTab).not.toHaveBeenCalled()
+    send.mockRestore()
   })
 
   it('refresh button pulls fresh state directly instead of depending solely on the background push', async () => {
